@@ -26,6 +26,14 @@
 
 #define DT_CMD_HDR 6
 
+//[PLATFORM]-Add-BEGIN by TCTSZ.yaohui.zeng, 2014/04/25, Modify LCD sequence
+#ifdef CONFIG_TCT_8X16_POP8LTE
+extern int tps65640_power_en;
+static struct dsi_panel_cmds on_cmds_sec;
+static struct dsi_panel_cmds off_cmds_sec;
+#endif
+//[PLATFORM]-Add-END by TCTSZ.yaohui.zeng, 2014/04/25
+
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
@@ -80,6 +88,18 @@ static void mdss_dsi_panel_bklt_pwm(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 		pr_err("%s: pwm_enable() failed err=%d\n", __func__, ret);
 	ctrl->pwm_enabled = 1;
 }
+
+/*[BUGFIX]-Add Begin by TCTSZ.LuZhi,2014/5/19,PR-678927,LCD white screen when power off */
+#if defined(CONFIG_TCT_8X16_ALTO45)
+static struct mdss_dsi_ctrl_pdata *ctrl_pdata_bl = NULL;
+void mdss_dsi_panel_bl_off(void)
+{
+	//led_trigger_event(bl_led_trigger, 0);
+	mdss_dsi_panel_bklt_pwm(ctrl_pdata_bl, 0);
+}
+EXPORT_SYMBOL_GPL(mdss_dsi_panel_bl_off);
+#endif
+/*[BUGFIX]-Add End by TCTSZ.LuZhi,2014/5/19,PR-678927,LCD white screen when power off */
 
 static char dcs_cmd[2] = {0x54, 0x00}; /* DTYPE_DCS_READ */
 static struct dsi_cmd_desc dcs_read_cmd = {
@@ -379,6 +399,11 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
+ /*[BUGFIX]-Add Begin by TCTSZ.LuZhi,2014/5/19,PR-678927,LCD white screen when power off */
+#if defined(CONFIG_TCT_8X16_ALTO45)
+	ctrl_pdata_bl = ctrl_pdata;
+#endif
+ /*[BUGFIX]-Add End by TCTSZ.LuZhi,2014/5/19,PR-678927,LCD white screen when power off */
 	/*
 	 * Some backlight controllers specify a minimum duty cycle
 	 * for the backlight brightness. If the brightness is less
@@ -434,6 +459,14 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	if (ctrl->on_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
 
+	//[PLATFORM]-Add-BEGIN by TCTSZ.yaohui.zeng, 2014/04/25, Modify LCD sequence
+#ifdef CONFIG_TCT_8X16_POP8LTE
+	gpio_set_value(tps65640_power_en, 1);//power on tps65640
+	mdelay(170);
+	if (on_cmds_sec.cmd_cnt)
+		mdss_dsi_panel_cmds_send(ctrl, &on_cmds_sec);
+#endif
+	//[PLATFORM]-Add-END by TCTSZ.yaohui.zeng, 2014/04/25
 	pr_debug("%s:-\n", __func__);
 	return 0;
 }
@@ -458,6 +491,14 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	if (ctrl->off_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
 
+	//[PLATFORM]-Add-BEGIN by TCTSZ.yaohui.zeng, 2014/04/25, Modify LCD sequence
+#ifdef CONFIG_TCT_8X16_POP8LTE
+	gpio_set_value(tps65640_power_en, 0);
+	mdelay(10);
+	if (off_cmds_sec.cmd_cnt)
+		mdss_dsi_panel_cmds_send(ctrl, &off_cmds_sec);
+#endif
+	//[PLATFORM]-Add-END by TCTSZ.yaohui.zeng, 2014/04/25
 	pr_debug("%s:-\n", __func__);
 	return 0;
 }

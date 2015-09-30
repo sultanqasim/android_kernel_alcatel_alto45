@@ -467,7 +467,7 @@ static bool mdss_mdp_traffic_shaper_helper(struct mdss_mdp_ctl *ctl,
 
 		if (enable) {
 			if (mdss_mdp_perf_calc_pipe(pipe, &perf, &mixer->roi,
-				false))
+				false, true))
 				continue;
 
 			clk_rate = max(mdss_mdp_get_mdp_clk_rate(ctl->mdata),
@@ -685,15 +685,8 @@ int mdss_mdp_writeback_start(struct mdss_mdp_ctl *ctl)
 
 	if (ctx->type == MDSS_MDP_WRITEBACK_TYPE_ROTATOR)
 		ctl->prepare_fnc = mdss_mdp_writeback_prepare_rot;
-	else {  /* wfd or line mode */
+	else /* wfd or line mode */
 		ctl->prepare_fnc = mdss_mdp_writeback_prepare_wfd;
-
-		/* WB2 Intr Enable is BIT(2) in MDSS 1.8.0 */
-		if (ctl->mdata->mdp_rev == MDSS_MDP_HW_REV_108) {
-			ctx->intr_type = MDSS_MDP_IRQ_WB_ROT_COMP;
-			ctx->intf_num = 2;
-		}
-	}
 	ctl->stop_fnc = mdss_mdp_writeback_stop;
 	ctl->display_fnc = mdss_mdp_writeback_display;
 	ctl->wait_fnc = mdss_mdp_wb_wait4comp;

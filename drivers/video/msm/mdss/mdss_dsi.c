@@ -27,6 +27,13 @@
 #include "mdss_dsi.h"
 #include "mdss_debug.h"
 
+//[PLATFORM]-Add-BEGIN by TCTSZ.yaohui.zeng, 2014/04/11, Add for lcd a080ean01 power control
+#ifdef CONFIG_TCT_8X16_POP8LTE
+static int lcd_power_en;
+int tps65640_power_en;
+#endif
+//[PLATFORM]-Add-eND by TCTSZ.yaohui.zeng
+
 static int mdss_dsi_pinctrl_set_state(struct mdss_dsi_ctrl_pdata *ctrl_pdata,
 					bool active);
 
@@ -102,6 +109,13 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata, int enable)
 		}
 
 		if (!pdata->panel_info.mipi.lp11_init) {
+
+//[PLATFORM]-Add-BEGIN by TCTSZ.yaohui.zeng, 2014/04/11, Add for lcd a080ean01 power control
+#ifdef CONFIG_TCT_8X16_POP8LTE
+		gpio_set_value(lcd_power_en, 1);
+#endif
+//[PLATFORM]-Add-END by TCTSZ.yaohui.zeng
+
 			if (mdss_dsi_pinctrl_set_state(ctrl_pdata, true))
 				pr_debug("reset enable: pinctrl not enabled\n");
 
@@ -119,6 +133,13 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata, int enable)
 					__func__, ret);
 			goto error;
 		}
+
+//[PLATFORM]-Add-BEGIN by TCTSZ.yaohui.zeng, 2014/04/11, Add for lcd a080ean01 power control
+#ifdef CONFIG_TCT_8X16_POP8LTE
+		gpio_set_value(lcd_power_en, 0);
+#endif
+//[PLATFORM]-Add-END by TCTSZ.yaohui.zeng
+
 		if (mdss_dsi_pinctrl_set_state(ctrl_pdata, false))
 			pr_debug("reset disable: pinctrl not enabled\n");
 
@@ -1621,6 +1642,90 @@ int dsi_panel_device_register(struct device_node *pan_node,
 		"qcom,platform-bklight-en-gpio", 0);
 	if (!gpio_is_valid(ctrl_pdata->bklt_en_gpio))
 		pr_info("%s: bklt_en gpio not specified\n", __func__);
+
+	if (pinfo->type == MIPI_CMD_PANEL) {
+		ctrl_pdata->disp_te_gpio = of_get_named_gpio
+			(ctrl_pdev->dev.of_node, "qcom,platform-te-gpio", 0);
+		if (!gpio_is_valid(ctrl_pdata->disp_te_gpio))
+			pr_err("%s:%d, Disp_te gpio not specified\n",
+			       __func__, __LINE__);
+	}
+
+	if (gpio_is_valid(ctrl_pdata->disp_te_gpio) &&
+					pinfo->type == MIPI_CMD_PANEL) {
+		rc = gpio_request(ctrl_pdata->disp_te_gpio, "disp_te");
+		if (rc) {
+			pr_err("request TE gpio failed, rc=%d\n",
+			       rc);
+			return -ENODEV;
+		}
+		rc = gpio_tlmm_config(GPIO_CFG(
+				ctrl_pdata->disp_te_gpio, 1,
+				GPIO_CFG_INPUT,
+				GPIO_CFG_PULL_DOWN,
+				GPIO_CFG_2MA),
+				GPIO_CFG_ENABLE);
+
+		if (rc) {
+			pr_err("%s: unable to config tlmm = %d\n",
+				__func__, ctrl_pdata->disp_te_gpio);
+			gpio_free(ctrl_pdata->disp_te_gpio);
+			return -ENODEV;
+		}
+
+		rc = gpio_direction_input(ctrl_pdata->disp_te_gpio);
+		if (rc) {
+			pr_err("set_direction for disp_en gpio failed, rc=%d\n",
+			       rc);
+			gpio_free(ctrl_pdata->disp_te_gpio);
+			return -ENODEV;
+		}
+		pr_debug("%s: te_gpio=%d\n", __func__,
+					ctrl_pdata->disp_te_gpio);
+	}
+//[PLATFORM]-Add-BEGIN by TCTSZ.yaohui.zeng, 2014/04/11, Add for lcd a080ean01 power control
+#ifdef CONFIG_TCT_8X16_POP8LTE
+		lcd_power_en = of_get_named_gpio(ctrl_pdev->dev.of_node,
+			 "qcom,platform-lcd-power-gpio", 0);
+		if (!gpio_is_valid(lcd_power_en))
+		pr_err("%s:%d, lcd_power_en gpio not specified\n",
+						__func__, __LINE__);
+		tps65640_power_en = of_get_named_gpio(ctrl_pdev->dev.of_node,
+			 "qcom,platform-tps65640-power-gpio", 0);
+		if (!gpio_is_valid(tps65640_power_en))
+		pr_err("%s:%d, tps65640_power_en gpio not specified\n",
+						__func__, __LINE__);
+		printk("~~~~~%s,request gpio~~\n",__func__);
+		rc = gpio_request(lcd_power_en, "disp_lcd_power");
+		if (rc) {
+			pr_err("request lcd power gpio failed, rc=%d\n",
+			       rc);
+			return -ENODEV;
+		}
+		rc = gpio_request(tps65640_power_en, "disp_tps65640_power");
+		if (rc) {
+			pr_err("request tps65640 power gpio failed, rc=%d\n",
+			       rc);
+			return -ENODEV;
+		}
+		rc = gpio_tlmm_config(GPIO_CFG(lcd_power_en, 0,GPIO_CFG_OUTPUT,
+								GPIO_CFG_NO_PULL,GPIO_CFG_2MA),
+								GPIO_CFG_ENABLE);
+		rc = gpio_tlmm_config(GPIO_CFG(tps65640_power_en, 0,GPIO_CFG_OUTPUT,
+							GPIO_CFG_NO_PULL,GPIO_CFG_2MA),
+							GPIO_CFG_ENABLE);
+		rc = gpio_direction_output(lcd_power_en,0);
+		if (rc) {
+			gpio_free(lcd_power_en);
+			return -ENODEV;
+		}
+		rc = gpio_direction_output(tps65640_power_en,0);
+		if (rc) {
+			gpio_free(tps65640_power_en);
+			return -ENODEV;
+		}
+#endif
+//[PLATFORM]-Add-end by TCTSZ.yaohui.zeng
 
 	ctrl_pdata->rst_gpio = of_get_named_gpio(ctrl_pdev->dev.of_node,
 			 "qcom,platform-reset-gpio", 0);
