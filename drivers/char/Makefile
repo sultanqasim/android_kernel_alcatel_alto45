@@ -65,3 +65,7 @@ obj-$(CONFIG_DIAG_CHAR)		+= diag/
 obj-$(CONFIG_MSM_ADSPRPC)       += adsprpc.o
 obj-$(CONFIG_MSM_RDBG)       += rdbg.o
 obj-$(CONFIG_MSM_SMD_PKT)       += msm_smd_pkt.o
+# [BUGFIX]-Mod-BEGIN by TCTNJ.(hui.wei),04/03/2014, FR-622499,.
+obj-y += oemver/
+# [BUGFIX]-Mod-END  by TCTNJ.(hui.wei)
+obj-y += oemfuse/
