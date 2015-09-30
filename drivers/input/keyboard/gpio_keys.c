@@ -30,6 +30,12 @@
 #include <linux/of_gpio.h>
 #include <linux/spinlock.h>
 #include <linux/pinctrl/consumer.h>
+/* [PLATFORM]-ADD-BEGIN by TCTNB.WJ, 2014/5/2, FR-650360 */
+#ifdef CONFIG_TCT_8X16_COMMON
+static DEFINE_MUTEX(gpio_keys_lock);
+static unsigned int init_ok=0;
+#endif
+/* [PLATFORM]-ADD-END */
 
 struct gpio_button_data {
 	const struct gpio_keys_button *button;
@@ -312,18 +318,50 @@ static DEVICE_ATTR(disabled_switches, S_IWUSR | S_IRUGO,
 		   gpio_keys_show_disabled_switches,
 		   gpio_keys_store_disabled_switches);
 
-static struct attribute *gpio_keys_attrs[] = {
-	&dev_attr_keys.attr,
-	&dev_attr_switches.attr,
-	&dev_attr_disabled_keys.attr,
-	&dev_attr_disabled_switches.attr,
-	NULL,
-};
 
-static struct attribute_group gpio_keys_attr_group = {
-	.attrs = gpio_keys_attrs,
-};
+/* [PLATFORM]-Modified-BEGIN by TCTNB.WJ, 2014/5/2,
+    FR-650360, dev for HALL
+*/
+#if defined(CONFIG_TCT_8X16_ALTO45)
+#define HAPTIC_INT_GPIO 98+902
+static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
+{
+	unsigned int gpio_code = 0;
 
+	const struct gpio_keys_button *button = bdata->button;
+	struct input_dev *input = bdata->input;
+	unsigned int type = button->type ?: EV_KEY;
+	int state = (gpio_get_value_cansleep(button->gpio) ? 1 : 0) ^ button->active_low;
+
+	if (type == EV_ABS) {
+		if (state)
+			input_event(input, type, button->code, button->value);
+	} else {
+        if(button->gpio == HAPTIC_INT_GPIO)
+        {
+           mutex_lock(&gpio_keys_lock);
+           if(!init_ok)
+           {
+               mutex_unlock(&gpio_keys_lock);
+               return;
+           }
+           mutex_unlock(&gpio_keys_lock);
+
+           state = (gpio_get_value_cansleep(button->gpio) ? 1 : 0) ^ button->active_low;
+           gpio_code = state? KEY_LOCK_LED_COVER : KEY_UNLOCK_COVER;
+           input_event(input, type, gpio_code, 1);
+           input_sync(input);
+           input_event(input, type, gpio_code, 0);
+        }
+		else
+		{
+		   input_event(input, type, button->code, state);
+	    }
+	}
+
+	input_sync(input);
+}
+#else
 static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 {
 	const struct gpio_keys_button *button = bdata->button;
@@ -339,6 +377,87 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 	}
 	input_sync(input);
 }
+
+#endif
+/* [PLATFORM]-Modified-END by TCTNB.WJ */
+
+
+
+/* [PLATFORM]-ADD-BEGIN by TCTNB.WJ, 2014/5/2, FR-650360 */
+#ifdef CONFIG_TCT_8X16_COMMON
+static ssize_t gpio_keys_init_ok_show(struct device *dev,
+                       struct device_attribute *attr,
+                       char *buf)
+{
+    unsigned int show_para=0;
+
+    mutex_lock(&gpio_keys_lock);
+    show_para = init_ok;
+    mutex_unlock(&gpio_keys_lock);
+
+    return sprintf(buf, "%u\n", show_para);
+}
+static ssize_t gpio_keys_init_ok_store(struct device *dev,
+					    struct device_attribute *attr,
+					     const char *buf, size_t count)
+{
+#if defined(CONFIG_TCT_8X16_ALTO45)
+
+    struct platform_device *pdev = to_platform_device(dev);
+    struct gpio_keys_drvdata *ddata = platform_get_drvdata(pdev);
+
+    int i=0, ret=0, store_para=0;
+
+    ret = sscanf(buf, "%d", &store_para);
+    if (ret != 1)
+        return count;
+
+    mutex_lock(&gpio_keys_lock);
+    init_ok = !!store_para;
+    if(!init_ok)
+    {
+       mutex_unlock(&gpio_keys_lock);
+       return count;
+    }
+    mutex_unlock(&gpio_keys_lock);
+
+    for(i=0; i<ddata->pdata->nbuttons; i++ )
+    {
+       struct gpio_button_data *bdata = &ddata->data[i];
+
+       if(bdata && bdata->button
+          && (HAPTIC_INT_GPIO == bdata->button->gpio)
+          && gpio_is_valid(bdata->button->gpio)
+          )
+       {
+           gpio_keys_gpio_report_event(bdata);
+       }
+    }
+#endif
+
+    return count;
+}
+
+static DEVICE_ATTR(init_ok, S_IWUSR | S_IRUGO,
+		   gpio_keys_init_ok_show,
+		   gpio_keys_init_ok_store);
+#endif
+
+static struct attribute *gpio_keys_attrs[] = {
+	&dev_attr_keys.attr,
+	&dev_attr_switches.attr,
+	&dev_attr_disabled_keys.attr,
+	&dev_attr_disabled_switches.attr,
+#ifdef CONFIG_TCT_8X16_COMMON
+    &dev_attr_init_ok.attr,
+#endif
+	NULL,
+};
+
+static struct attribute_group gpio_keys_attr_group = {
+	.attrs = gpio_keys_attrs,
+};
+
 
 static void gpio_keys_gpio_work_func(struct work_struct *work)
 {
@@ -497,6 +616,13 @@ static int gpio_keys_setup_key(struct platform_device *pdev,
 
 	input_set_capability(input, button->type ?: EV_KEY, button->code);
 
+/* [PLATFORM]-ADD-BEGIN by TCTNB.WJ, 2014/5/2,  FR-650360, dev for HALL */
+#if defined(CONFIG_TCT_8X16_ALTO45)
+    input_set_capability(input, EV_KEY, KEY_UNLOCK_COVER);
+    input_set_capability(input, EV_KEY, KEY_LOCK_LED_COVER);
+#endif
+/* [PLATFORM]-ADD-END by TCTNB.WJ */
+
 	/*
 	 * If platform has specified that the button can be disabled,
 	 * we don't want it to share the interrupt line.
@@ -520,6 +646,8 @@ fail:
 	return error;
 }
 
+/* [PLATFORM]-DEL-BEGIN by TCTNB.WJ, 2014/6/9, dev for HALL */
+#ifndef CONFIG_TCT_8X16_ALTO45
 static void gpio_keys_report_state(struct gpio_keys_drvdata *ddata)
 {
 	struct input_dev *input = ddata->input;
@@ -532,6 +660,8 @@ static void gpio_keys_report_state(struct gpio_keys_drvdata *ddata)
 	}
 	input_sync(input);
 }
+#endif
+/* [PLATFORM]-DEL-END by TCTNB.WJ */
 
 static int gpio_keys_pinctrl_configure(struct gpio_keys_drvdata *ddata,
 							bool active)
@@ -580,8 +710,12 @@ static int gpio_keys_open(struct input_dev *input)
 			return error;
 	}
 
+/* [PLATFORM]-DEL-BEGIN by TCTNB.WJ, 2014/6/9, dev for HALL */
+#ifndef CONFIG_TCT_8X16_ALTO45
 	/* Report current state of buttons that are connected to GPIOs */
 	gpio_keys_report_state(ddata);
+#endif
+/* [PLATFORM]-DEL-END by TCTNB.WJ */
 
 	return 0;
 }
@@ -931,7 +1065,12 @@ static int gpio_keys_resume(struct device *dev)
 	if (error)
 		return error;
 
+/* [PLATFORM]-DEL-BEGIN by TCTNB.WJ, 2014/6/9, dev for HALL */
+#ifndef CONFIG_TCT_8X16_ALTO45
 	gpio_keys_report_state(ddata);
+#endif
+/* [PLATFORM]-DEL-END by TCTNB.WJ */
+
 	return 0;
 }
 #endif

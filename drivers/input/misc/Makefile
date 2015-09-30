@@ -70,8 +70,10 @@ obj-$(CONFIG_SENSORS_STK3X1X)		+= stk3x1x.o
 obj-$(CONFIG_SENSORS_CAPELLA_CM36283)	+= cm36283.o
 obj-$(CONFIG_SENSORS_MPU6050)		+= mpu6050.o
 obj-$(CONFIG_SENSORS_AKM8963)		+= akm8963.o
+# [PLATFORM]-Mod-BEGIN by TCTNB.YJ, 2014/04/11, add sensor driver.
+ifndef CONFIG_TCT_8X16_COMMON
 obj-$(CONFIG_SENSORS_AKM09911)		+= akm09911.o
-obj-$(CONFIG_SENSORS_LIS3DH)		+= lis3dh_acc.o
+
 obj-$(CONFIG_SENSORS_BMA2X2)	+= bstclass.o
 
 obj-$(CONFIG_SENSORS_BMA2X2)	+= bma2x2.o
@@ -83,3 +85,7 @@ endif
 ifeq ($(CONFIG_BOSCH_BMA2X2_ENABLE_INT2),y)
 	EXTRA_CFLAGS += -DBMA2X2_ENABLE_INT2
 endif
+endif
+# [PLATFORM]-Mod-END by TCTNB.YJ
+obj-$(CONFIG_SENSORS_LIS3DH)		+= lis3dh_acc.o
+

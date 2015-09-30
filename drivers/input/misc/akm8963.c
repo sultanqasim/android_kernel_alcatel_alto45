@@ -72,7 +72,6 @@ struct akm_compass_data {
 	struct delayed_work	dwork;
 	struct mutex		op_mutex;
 
-
 	wait_queue_head_t	drdy_wq;
 	wait_queue_head_t	open_wq;
 

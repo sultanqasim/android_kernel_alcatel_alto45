@@ -75,8 +75,20 @@ obj-$(CONFIG_TOUCHSCREEN_WM97XX_MAINSTONE)	+= mainstone-wm97xx.o
 obj-$(CONFIG_TOUCHSCREEN_WM97XX_ZYLONITE)	+= zylonite-wm97xx.o
 obj-$(CONFIG_TOUCHSCREEN_W90X900)	+= w90p910_ts.o
 obj-$(CONFIG_TOUCHSCREEN_TPS6507X)	+= tps6507x-ts.o
+# [PLATFORM]-Mod-BEGIN by TCTNB.YJ, 2014/03/25, add macro for TP driver.
+ifndef CONFIG_TCT_8X16_COMMON
 obj-$(CONFIG_TOUCHSCREEN_FT5X06)	+= ft5x06_ts.o
+endif
+obj-$(CONFIG_TOUCHSCREEN_MSTAR21XX)	+= msg21xx_ts.o
 obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_RMI4_DEV)	+= synaptics_rmi_dev.o
 obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE) 	+= synaptics_fw_update.o
 obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_RMI4)		+= synaptics_i2c_rmi4.o
+
+ifdef CONFIG_TCT_8X16_COMMON
+obj-$(CONFIG_TCT_8X16_COMMON)		+= tp_tct/
+obj-$(CONFIG_TCT_8X16_ALTO45)		+= gt9xx_v2/
+else
 obj-$(CONFIG_TOUCHSCREEN_GT9XX)		+= gt9xx/
+endif
+# [PLATFORM]-Mod-END by TCTNB.YJ
+
