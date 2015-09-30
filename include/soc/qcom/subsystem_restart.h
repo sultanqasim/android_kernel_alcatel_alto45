@@ -92,6 +92,7 @@ extern void subsys_set_crash_status(struct subsys_device *dev, bool crashed);
 extern bool subsys_get_crash_status(struct subsys_device *dev);
 void notify_proxy_vote(struct device *device);
 void notify_proxy_unvote(struct device *device);
+extern char panic_subsystem[10];
 #else
 
 static inline int subsys_get_restart_level(struct subsys_device *dev)

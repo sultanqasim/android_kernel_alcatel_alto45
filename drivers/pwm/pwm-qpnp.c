@@ -1475,7 +1475,19 @@ int pwm_config_us(struct pwm_device *pwm, int duty_us, int period_us)
 	spin_lock_irqsave(&chip->lpg_lock, flags);
 
 	if (chip->pwm_config.pwm_period != period_us) {
-		qpnp_lpg_calc_period(LVL_USEC, period_us, chip);
+/*[PLATFORM]-Add-BEGIN by ZXZ, FR-776540 2014/08/26, Modify LCD backlight steps,  pwm_size = 9  pwm frequency =37K HZ*/
+#ifdef CONFIG_TCT_8X16_ALTO45
+	if(0==strcmp(pwm->label,"lcd-bklt"))
+		{
+			chip->pwm_config.period.pwm_size = 9;
+			chip->pwm_config.period.clk = 2;
+			chip->pwm_config.period.pre_div = 0;
+			chip->pwm_config.period.pre_div_exp = 0;
+		}
+#else
+			qpnp_lpg_calc_period(LVL_USEC, period_us, chip);
+#endif
+/*[PLATFORM]-Add-END by ZXZ */
 		qpnp_lpg_save_period(chip);
 		chip->pwm_config.pwm_period = period_us;
 		if ((unsigned)period_us > (unsigned)(-1) / NSEC_PER_USEC)

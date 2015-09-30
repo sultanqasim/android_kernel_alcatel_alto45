@@ -109,8 +109,6 @@ static struct saw2_data saw2_info[] = {
 	},
 };
 
-static uint32_t num_pmic_data;
-
 static inline uint32_t msm_spm_drv_get_num_spm_entry(
 		struct msm_spm_driver_data *dev)
 {
@@ -176,14 +174,6 @@ static inline void msm_spm_drv_set_vctl2(struct msm_spm_driver_data *dev,
 
 	msm_spm_drv_flush_shadow(dev, MSM_SPM_REG_SAW2_VCTL);
 	msm_spm_drv_flush_shadow(dev, MSM_SPM_REG_SAW2_PMIC_DATA_3);
-}
-
-static inline uint32_t msm_spm_drv_get_num_pmic_data(
-		struct msm_spm_driver_data *dev)
-{
-	msm_spm_drv_load_shadow(dev, MSM_SPM_REG_SAW2_ID);
-	mb();
-	return (dev->reg_shadow[MSM_SPM_REG_SAW2_ID] >> 4) & 0x7;
 }
 
 static inline uint32_t msm_spm_drv_get_sts_pmic_state(
@@ -304,7 +294,6 @@ int msm_spm_drv_set_low_power_mode(struct msm_spm_driver_data *dev,
 			pr_info("%s: reg %02x = 0x%08x\n", __func__,
 				dev->reg_offsets[i], dev->reg_shadow[i]);
 	}
-	msm_spm_drv_load_shadow(dev, MSM_SPM_REG_SAW2_SPM_STS);
 
 	return 0;
 }
@@ -484,7 +473,7 @@ void msm_spm_drv_reinit(struct msm_spm_driver_data *dev)
 {
 	int i;
 
-	for (i = 0; i < MSM_SPM_REG_SAW2_PMIC_DATA_0 + num_pmic_data; i++)
+	for (i = 0; i < MSM_SPM_REG_NR_INITIALIZE; i++)
 		msm_spm_drv_flush_shadow(dev, i);
 
 	msm_spm_drv_flush_seq_entry(dev);
@@ -526,18 +515,14 @@ int msm_spm_drv_init(struct msm_spm_driver_data *dev,
 		BUG_ON(!found);
 	}
 
-	if (!num_pmic_data)
-		num_pmic_data = msm_spm_drv_get_num_pmic_data(dev);
-
-	for (i = 0; i < MSM_SPM_REG_SAW2_PMIC_DATA_0 + num_pmic_data; i++)
+	for (i = 0; i < MSM_SPM_REG_NR_INITIALIZE; i++)
 		msm_spm_drv_flush_shadow(dev, i);
-
 	/* barrier to ensure write completes before we update shadow
 	 * registers
 	 */
 	mb();
 
-	for (i = 0; i < MSM_SPM_REG_SAW2_PMIC_DATA_0 + num_pmic_data; i++)
+	for (i = 0; i < MSM_SPM_REG_NR_INITIALIZE; i++)
 		msm_spm_drv_load_shadow(dev, i);
 
 	/* barrier to ensure read completes before we proceed further*/

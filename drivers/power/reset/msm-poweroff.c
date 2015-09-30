@@ -30,6 +30,8 @@
 
 #include <soc/qcom/scm.h>
 #include <soc/qcom/restart.h>
+//[BUGFIX]-Added By Miao 657706, keep subsystem reboot
+#include <soc/qcom/subsystem_restart.h>
 
 #define EMERGENCY_DLOAD_MAGIC1    0x322A4F99
 #define EMERGENCY_DLOAD_MAGIC2    0xC67E4350
@@ -38,7 +40,7 @@
 #define SCM_IO_DISABLE_PMIC_ARBITER	1
 #define SCM_WDOG_DEBUG_BOOT_PART	0x9
 #define SCM_DLOAD_MODE			0X10
-#define SCM_EDLOAD_MODE			0X02
+#define SCM_EDLOAD_MODE			0X01
 #define SCM_DLOAD_CMD			0x10
 
 
@@ -59,7 +61,7 @@ static void *emergency_dload_mode_addr;
 static bool scm_dload_supported;
 
 static int dload_set(const char *val, struct kernel_param *kp);
-static int download_mode = 1;
+static int download_mode = 0;
 module_param_call(download_mode, dload_set, param_get_int,
 			&download_mode, 0644);
 static int panic_prep_restart(struct notifier_block *this,
@@ -189,9 +191,13 @@ static void msm_restart_prepare(const char *cmd)
 	 * Write download mode flags if restart_mode says so
 	 * Kill download mode if master-kill switch is set
 	 */
+	if(restart_mode == RESTART_DLOAD)
+	{
+		set_dload_mode(0);
+		dload_mode_enabled = 1;
+	}else
+		set_dload_mode(download_mode && in_panic);
 
-	set_dload_mode(download_mode &&
-			(in_panic || restart_mode == RESTART_DLOAD));
 #endif
 
 	/* Hard reset the PMIC unless memory contents must be maintained. */
@@ -220,6 +226,25 @@ static void msm_restart_prepare(const char *cmd)
 			__raw_writel(0x77665501, restart_reason);
 		}
 	}
+//[BUGFIX]-Added By Miao 657706, keep subsystem reboot
+      if(in_panic){
+        printk(KERN_ERR "subsystem %s crash\r\n",panic_subsystem);
+         if (!memcmp(panic_subsystem, "modem", 5))
+                __raw_writel(0x11223300, restart_reason);
+         else if (!memcmp(panic_subsystem, "wcnss", 5))
+                __raw_writel(0x11223311, restart_reason);
+           else if (!memcmp(panic_subsystem, "adsp", 4)  || !memcmp(panic_subsystem, "ADSP", 4))
+                __raw_writel(0x11223322, restart_reason);
+           else
+              __raw_writel(0x11223333, restart_reason);
+      }
+
+//[PLATFORM]-Add-BEGIN by TCTNB.xlj, FR-634457, 2014/04/28
+	if (restart_mode == RESTART_DLOAD) {
+		enable_emergency_dload_mode();
+//		__raw_writel(9006, restart_reason);
+	}
+// [FEATURE]-Add-END by TCTNB.xlj
 
 	flush_cache_all();
 

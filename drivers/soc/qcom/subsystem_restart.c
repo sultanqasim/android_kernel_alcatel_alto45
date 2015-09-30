@@ -42,6 +42,8 @@
 #include <asm/current.h>
 
 static int enable_debug;
+//[BUGFIX]-Added By Miao 657706, keep subsystem reboot
+char panic_subsystem[10];
 module_param(enable_debug, int, S_IRUGO | S_IWUSR);
 
 /**
@@ -813,7 +815,8 @@ int subsystem_restart_dev(struct subsys_device *dev)
 
 	pr_info("Restart sequence requested for %s, restart_level = %s.\n",
 		name, restart_levels[dev->restart_level]);
-
+//[BUGFIX]-Added By Miao 657706, keep subsystem reboot
+    memcpy(panic_subsystem,name,10);
 	switch (dev->restart_level) {
 
 	case RESET_SUBSYS_COUPLED:

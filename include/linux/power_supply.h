@@ -143,6 +143,15 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_TEMP_ALERT_MAX,
 	POWER_SUPPLY_PROP_COOL_TEMP,
 	POWER_SUPPLY_PROP_WARM_TEMP,
+/* [PLATFORM]-Add-BEGIN by TCTNB.FLF, FR-645055, 2014/07/11, add thermal protect */
+#ifdef CONFIG_TCT_8X16_ALTO45
+	POWER_SUPPLY_PROP_COLD_TEMP,
+	POWER_SUPPLY_PROP_OVERHEAT_TEMP,
+/* [PLATFORM]-Mod-BEGIN by TCTNB.FLF, PR-721050, 2014/08/12, fix capacity drops after charging full */
+	POWER_SUPPLY_PROP_BATT_STATUS,
+/* [PLATFORM]-Mod-END by TCTNB.FLF */
+#endif
+/* [PLATFORM]-Add-END by TCTNB.FLF */
 	POWER_SUPPLY_PROP_TEMP_AMBIENT,
 	POWER_SUPPLY_PROP_TEMP_AMBIENT_ALERT_MIN,
 	POWER_SUPPLY_PROP_TEMP_AMBIENT_ALERT_MAX,
@@ -155,6 +164,7 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_SYSTEM_TEMP_LEVEL,
 	POWER_SUPPLY_PROP_RESISTANCE,
 	POWER_SUPPLY_PROP_RESISTANCE_CAPACITIVE,
+	POWER_SUPPLY_PROP_RECALIB_VBAT,
 	/* Local extensions */
 	POWER_SUPPLY_PROP_USB_HC,
 	POWER_SUPPLY_PROP_USB_OTG,
@@ -272,6 +282,8 @@ extern int power_supply_set_supply_type(struct power_supply *psy,
 extern int power_supply_set_hi_power_state(struct power_supply *psy, int value);
 extern int power_supply_set_low_power_state(struct power_supply *psy,
 							int value);
+extern int power_supply_recalib_vbat(struct power_supply *psy,
+						bool enable);
 extern int power_supply_is_system_supplied(void);
 extern int power_supply_register(struct device *parent,
 				 struct power_supply *psy);
@@ -311,6 +323,9 @@ static inline int power_supply_set_hi_power_state(struct power_supply *psy,
 							{ return -ENOSYS; }
 static inline int power_supply_set_low_power_state(struct power_supply *psy,
 							int value)
+							{ return -ENOSYS; }
+static inline int power_supply_recalib_vbat(struct power_supply *psy,
+							bool enable)
 							{ return -ENOSYS; }
 static inline int power_supply_is_system_supplied(void) { return -ENOSYS; }
 static inline int power_supply_register(struct device *parent,

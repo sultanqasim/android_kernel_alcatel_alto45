@@ -228,6 +228,23 @@ int power_supply_set_low_power_state(struct power_supply *psy, int value)
 }
 EXPORT_SYMBOL(power_supply_set_low_power_state);
 
+/**
+ * power_supply_recalib_vbat -  Indicte that a vbat recalibration is required
+ * @psy:	the power supply to control
+ * @enable:	sets the recalibrate property
+ */
+int power_supply_recalib_vbat(struct power_supply *psy, bool enable)
+{
+	const union power_supply_propval ret = {enable,};
+
+	if (psy->set_property)
+		return psy->set_property(psy,
+			POWER_SUPPLY_PROP_RECALIB_VBAT, &ret);
+
+	return -ENXIO;
+}
+EXPORT_SYMBOL(power_supply_recalib_vbat);
+
 static int __power_supply_changed_work(struct device *dev, void *data)
 {
 	struct power_supply *psy = (struct power_supply *)data;

@@ -470,6 +470,18 @@ struct input_keymap_entry {
 
 #define KEY_MICMUTE		248	/* Mute / unmute the microphone */
 
+/*[PLATFORM]-Add BEGIN by TCTNB.YJ, 2014/05/06, add for double click waken function*/
+#define KEY_UNLOCK		249	/* wakeup the phone and then unlock the screen */
+/*[PLATFORM]-Add END by TCTNB.YJ */
+
+/* [PLATFORM]-ADD-BEGIN by TCTNB.WJ, 2014/6/9, FR-650360, dev for HALL  */
+#if defined(CONFIG_TCT_8X16_ALTO45)
+#define KEY_UNLOCK_COVER        250     /* 250, for LED/window cover type, unlock  */
+#define KEY_LOCK_LED_COVER      251     /* 251, for LED cover type, lock  */
+#endif
+/* [PLATFORM]-ADD-END by TCTNB.WJ */
+
+
 /* Code 255 is reserved for special needs of AT keyboard driver */
 
 #define BTN_MISC		0x100

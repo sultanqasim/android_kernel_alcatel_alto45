@@ -131,6 +131,7 @@ enum {
 
 enum {
 	WRKARND_PON_OCV_COMP = BIT(0),
+	WRKARND_RECALIB_VBAT = BIT(1),
 };
 
 struct bms_irq {
@@ -149,6 +150,7 @@ struct temp_curr_comp_map {
 };
 
 struct bms_dt_cfg {
+	bool				cfg_recalib_vbat;
 	bool				cfg_report_charger_eoc;
 	bool				cfg_force_bms_active_on_charger;
 	bool				cfg_force_s3_on_suspend;
@@ -261,6 +263,8 @@ struct qpnp_bms_chip {
 };
 
 static struct qpnp_bms_chip *the_chip;
+static int qpnp_vm_bms_recalib_vbat(struct qpnp_bms_chip *chip,
+							int enable);
 
 /*
  * TODO: Characterize current compensation at different temperature and
@@ -318,10 +322,22 @@ static int qpnp_read_wrapper(struct qpnp_bms_chip *chip, u8 *val,
 {
 	int rc;
 	struct spmi_device *spmi = chip->spmi;
+/* [PLATFORM]-Mod-BEGIN by TCTNB.FLF, CR-788710, 2014/09/15,  read more times when error occurs */
+#ifdef CONFIG_TCT_8X16_ALTO45
+	int cnt = 1;
 
+	do {
+		rc = spmi_ext_register_readl(spmi->ctrl, spmi->sid, base, val, count);
+		if (rc)
+			pr_err("SPMI read failed rc=%d, cnt=%d\n", rc, cnt);
+		cnt++;
+	} while (rc && cnt <= 5);
+#else
 	rc = spmi_ext_register_readl(spmi->ctrl, spmi->sid, base, val, count);
 	if (rc)
 		pr_err("SPMI read failed rc=%d\n", rc);
+#endif
+/* [PLATFORM]-Mod-END by TCTNB.FLF */
 
 	return rc;
 }
@@ -835,7 +851,8 @@ static int lookup_soc_ocv(struct qpnp_bms_chip *chip, int ocv_uv, int batt_temp)
 	soc_cutoff = interpolate_pc(chip->batt_data->pc_temp_ocv_lut,
 				batt_temp, chip->dt.cfg_v_cutoff_uv / 1000);
 
-	soc_final = (100 * (soc_ocv - soc_cutoff)) / (100 - soc_cutoff);
+	soc_final = DIV_ROUND_CLOSEST(100 * (soc_ocv - soc_cutoff),
+							(100 - soc_cutoff));
 
 	if (chip->batt_data->ibat_acc_lut) {
 		/* Apply  ACC logic only if we discharging */
@@ -853,11 +870,12 @@ static int lookup_soc_ocv(struct qpnp_bms_chip *chip, int ocv_uv, int batt_temp)
 				else
 					acc = fcc;
 			}
-			soc_uuc = ((fcc - acc) * 100) / acc;
+			soc_uuc = ((fcc - acc) * 100) / fcc;
 
 			soc_uuc = adjust_uuc(chip, soc_uuc);
 
-			soc_acc = soc_final - soc_uuc;
+			soc_acc = DIV_ROUND_CLOSEST(100 * (soc_ocv - soc_uuc),
+							(100 - soc_uuc));
 
 			pr_debug("fcc=%d acc=%d soc_final=%d soc_uuc=%d soc_acc=%d current_now=%d iavg_ma=%d\n",
 				fcc, acc, soc_final, soc_uuc,
@@ -1072,8 +1090,15 @@ static int get_battery_status(struct qpnp_bms_chip *chip)
 		chip->batt_psy = power_supply_get_by_name("battery");
 	if (chip->batt_psy) {
 		/* if battery has been registered, use the status property */
+/* [PLATFORM]-Mod-BEGIN by TCTNB.FLF, PR-721050, 2014/08/12, fix capacity drops after charging full */
+#ifdef CONFIG_TCT_8X16_ALTO45
+		chip->batt_psy->get_property(chip->batt_psy,
+					POWER_SUPPLY_PROP_BATT_STATUS, &ret);
+#else
 		chip->batt_psy->get_property(chip->batt_psy,
 					POWER_SUPPLY_PROP_STATUS, &ret);
+#endif
+/* [PLATFORM]-Mod-END by TCTNB.FLF */
 		return ret.intval;
 	}
 
@@ -1086,6 +1111,12 @@ static int get_batt_therm(struct qpnp_bms_chip *chip, int *batt_temp)
 {
 	int rc;
 	struct qpnp_vadc_result result;
+/* [PLATFORM]-Mod-BEGIN by TCTNB.FLF, FR-644906, 2014/05/04, disable tem check for mini */
+#ifdef FEATURE_TCTNB_MMITEST
+		*batt_temp = BMS_DEFAULT_TEMP;
+		return 0;
+#endif
+/* [PLATFORM]-Mod-END by TCTNB.FLF */
 
 	rc = qpnp_vadc_read(chip->vadc_dev, LR_MUX1_BATT_THERM, &result);
 	if (rc) {
@@ -1263,8 +1294,15 @@ static int report_eoc(struct qpnp_bms_chip *chip)
 	if (chip->batt_psy == NULL)
 		chip->batt_psy = power_supply_get_by_name("battery");
 	if (chip->batt_psy) {
+/* [PLATFORM]-Mod-BEGIN by TCTNB.FLF, PR-721050, 2014/08/12, fix capacity drops after charging full */
+#ifdef CONFIG_TCT_8X16_ALTO45
+		rc = chip->batt_psy->get_property(chip->batt_psy,
+				POWER_SUPPLY_PROP_BATT_STATUS, &ret);
+#else
 		rc = chip->batt_psy->get_property(chip->batt_psy,
 				POWER_SUPPLY_PROP_STATUS, &ret);
+#endif
+/* [PLATFORM]-Mod-END by TCTNB.FLF */
 		if (rc) {
 			pr_err("Unable to get battery 'STATUS' rc=%d\n", rc);
 		} else if (ret.intval != POWER_SUPPLY_STATUS_FULL) {
@@ -1391,6 +1429,8 @@ static int report_vm_bms_soc(struct qpnp_bms_chip *chip)
 	}
 
 	if (chip->last_soc != -EINVAL) {
+		if ((chip->last_soc > soc) && (chip->current_now < 0))
+			soc = chip->last_soc;
 		/*
 		 * last_soc < soc  ... if we have not been charging at all
 		 * since the last time this was called, report previous SoC.
@@ -1843,6 +1883,7 @@ static enum power_supply_property bms_power_props[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_OCV,
 	POWER_SUPPLY_PROP_HI_POWER,
 	POWER_SUPPLY_PROP_LOW_POWER,
+	POWER_SUPPLY_PROP_RECALIB_VBAT,
 	POWER_SUPPLY_PROP_BATTERY_TYPE,
 	POWER_SUPPLY_PROP_TEMP,
 };
@@ -1856,6 +1897,7 @@ qpnp_vm_bms_property_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_VOLTAGE_OCV:
 	case POWER_SUPPLY_PROP_HI_POWER:
 	case POWER_SUPPLY_PROP_LOW_POWER:
+	case POWER_SUPPLY_PROP_RECALIB_VBAT:
 		return 1;
 	default:
 		break;
@@ -1911,6 +1953,9 @@ static int qpnp_vm_bms_power_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_LOW_POWER:
 		val->intval = !is_hi_power_state_requested(chip);
 		break;
+	case POWER_SUPPLY_PROP_RECALIB_VBAT:
+		val->intval = !!(chip->workaround_flag & WRKARND_RECALIB_VBAT);
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -1945,6 +1990,11 @@ static int qpnp_vm_bms_power_set_property(struct power_supply *psy,
 		rc = qpnp_vm_bms_config_power_state(chip, val->intval, false);
 		if (rc)
 			pr_err("Unable to set power-state rc=%d\n", rc);
+		break;
+	case POWER_SUPPLY_PROP_RECALIB_VBAT:
+		rc = qpnp_vm_bms_recalib_vbat(chip, val->intval);
+		if (rc)
+			pr_err("Unable to set current sink rc=%d\n", rc);
 		break;
 	default:
 		return -EINVAL;
@@ -2322,6 +2372,69 @@ fail_state:
 	return IRQ_HANDLED;
 }
 
+static int qpnp_vm_bms_recalib_vbat(struct qpnp_bms_chip *chip,
+						int enable)
+{
+	int rc;
+
+	if (!(chip->workaround_flag & WRKARND_RECALIB_VBAT)) {
+		pr_debug("Re-calibration of VBAT not enabled\n");
+		return 0;
+	}
+	pr_debug("Recalibrate VBAT event [%d]\n", enable);
+
+	/*
+	 * Change the FSM state to forcefully stop the sample
+	 * accumulation and capture the accumulated VBAT
+	 * samples
+	 */
+	mutex_lock(&chip->state_change_mutex);
+	force_fsm_state(chip, S3_STATE);
+	mutex_unlock(&chip->state_change_mutex);
+
+	mutex_lock(&chip->bms_data_mutex);
+	memset(&chip->bms_data, 0, sizeof(chip->bms_data));
+
+	rc = read_and_populate_fifo_data(chip);
+	if (rc)
+		pr_err("Unable to read FIFO data rc=%d\n", rc);
+	rc = read_and_populate_acc_data(chip);
+	if (rc)
+		pr_err("Unable to read ACC_SD data rc=%d\n", rc);
+	rc = clear_fifo_acc_data(chip);
+	if (rc)
+		pr_err("Unable to clear FIFO/ACC data rc=%d\n", rc);
+
+	/*
+	 * Recalibrate ADC to account for the change in the PMIC
+	 * current-sink configuration
+	 */
+	rc = calib_vadc(chip);
+	if (rc)
+		pr_err("Unable to calibrate vadc rc=%d\n", rc);
+
+	chip->bms_data.seq_num = chip->seq_num++;
+
+	dump_bms_data(__func__, chip);
+
+	/* signal the read thread */
+	chip->data_ready = 1;
+	wake_up_interruptible(&chip->bms_wait_q);
+
+	/* hold a wake lock until the read thread is scheduled */
+	if (chip->bms_dev_open)
+		pm_stay_awake(chip->dev);
+
+	mutex_unlock(&chip->bms_data_mutex);
+
+	/* Force back the FSM to S2_state to restart sampling */
+	mutex_lock(&chip->state_change_mutex);
+	force_fsm_state(chip, S2_STATE);
+	mutex_unlock(&chip->state_change_mutex);
+
+	return 0;
+}
+
 static int read_shutdown_ocv_soc(struct qpnp_bms_chip *chip)
 {
 	u8 stored_soc = 0;
@@ -2399,21 +2512,29 @@ static int interpolate_current_comp(int die_temp)
 
 static void adjust_pon_ocv(struct qpnp_bms_chip *chip, int batt_temp)
 {
-	int rc, current_ma, rbatt_mohm, die_temp, delta_uv, soc;
+	int rc, current_ma, rbatt_mohm, die_temp, delta_uv, pc;
 	struct qpnp_vadc_result result;
 
 	rc = qpnp_vadc_read(chip->vadc_dev, DIE_TEMP, &result);
 	if (rc) {
 		pr_err("error reading adc channel=%d, rc=%d\n", DIE_TEMP, rc);
 	} else {
-		soc = lookup_soc_ocv(chip, chip->last_ocv_uv, batt_temp);
-		rbatt_mohm = get_rbatt(chip, soc, batt_temp);
+		pc = interpolate_pc(chip->batt_data->pc_temp_ocv_lut,
+					batt_temp, chip->last_ocv_uv / 1000);
+		/*
+		* For pc < 2, use the rbatt of pc = 2. This is to avoid
+		* the huge rbatt values at pc < 2 which can disrupt the pon_ocv
+		* calculations.
+		*/
+		if (pc < 2)
+			pc = 2;
+		rbatt_mohm = get_rbatt(chip, pc, batt_temp);
 		/* convert die_temp to DECIDEGC */
 		die_temp = (int)result.physical / 100;
 		current_ma = interpolate_current_comp(die_temp);
 		delta_uv = rbatt_mohm * current_ma;
-		pr_debug("PON OCV chaged from %d to %d soc=%d rbatt=%d current_ma=%d die_temp=%d batt_temp=%d delta_uv=%d\n",
-			chip->last_ocv_uv, chip->last_ocv_uv + delta_uv, soc,
+		pr_debug("PON OCV changed from %d to %d pc=%d rbatt=%d current_ma=%d die_temp=%d batt_temp=%d delta_uv=%d\n",
+			chip->last_ocv_uv, chip->last_ocv_uv + delta_uv, pc,
 			rbatt_mohm, current_ma, die_temp, batt_temp, delta_uv);
 
 		chip->last_ocv_uv += delta_uv;
@@ -2478,6 +2599,11 @@ static int calculate_initial_soc(struct qpnp_bms_chip *chip)
 		 /* !warm_reset use PON OCV only if shutdown SOC is invalid */
 		chip->calculated_soc = lookup_soc_ocv(chip,
 					chip->last_ocv_uv, batt_temp);
+//[PLATFORM]Add Begin by TCTNB-pingao.yang 2014/7/23, refer to case 730279.
+	#ifdef CONFIG_TCT_8X16_COMMON
+		shutdown_soc = chip->shutdown_soc;
+	#endif
+//[PLATFORM]Add End by TCTNB-pingao.yang
 		if (!shutdown_soc_invalid &&
 			(abs(shutdown_soc - chip->calculated_soc) <
 				chip->dt.cfg_shutdown_soc_valid_limit)) {
@@ -2983,6 +3109,7 @@ static int set_battery_data(struct qpnp_bms_chip *chip)
 		pr_err("cannot read battery id err = %lld\n", battery_id);
 		return battery_id;
 	}
+	pr_err("flf %s: battery_id = %lld\n", __func__, battery_id);
 	node = of_find_node_by_name(chip->spmi->dev.of_node,
 					"qcom,battery-data");
 	if (!node) {
@@ -3185,6 +3312,8 @@ static int parse_bms_dt_properties(struct qpnp_bms_chip *chip)
 	chip->dt.cfg_force_bms_active_on_charger = of_property_read_bool(
 			chip->spmi->dev.of_node,
 			"qcom,force-bms-active-on-charger");
+	chip->dt.cfg_recalib_vbat = of_property_read_bool(
+			chip->spmi->dev.of_node, "qcom,recalib-vbat-on-isink");
 	pr_debug("v_cutoff_uv=%d, max_v=%d\n", chip->dt.cfg_v_cutoff_uv,
 					chip->dt.cfg_max_voltage_uv);
 	pr_debug("r_conn=%d shutdown_soc_valid_limit=%d\n",
@@ -3194,11 +3323,12 @@ static int parse_bms_dt_properties(struct qpnp_bms_chip *chip)
 				chip->dt.cfg_ignore_shutdown_soc,
 				chip->dt.cfg_use_voltage_soc,
 				chip->dt.cfg_low_soc_fifo_length);
-	pr_debug("force-s3-on-suspend=%d report-charger-eoc=%d disable-bms=%d disable-suspend-on-usb=%d\n",
+	pr_debug("force-s3-on-suspend=%d report-charger-eoc=%d disable-bms=%d disable-suspend-on-usb=%d cfg_recalib_vbat=%d\n",
 			chip->dt.cfg_force_s3_on_suspend,
 			chip->dt.cfg_report_charger_eoc,
 			chip->dt.cfg_disable_bms,
-			chip->dt.cfg_force_bms_active_on_charger);
+			chip->dt.cfg_force_bms_active_on_charger,
+			chip->dt.cfg_recalib_vbat);
 
 	return 0;
 }
@@ -3271,6 +3401,19 @@ unregister_chrdev:
 	return rc;
 }
 
+static void config_bms_wrkarnd(struct qpnp_bms_chip *chip)
+{
+	if ((chip->revid_data->pmic_subtype == PM8916_V2P0_SUBTYPE) &&
+				chip->revid_data->rev4 == PM8916_V2P0_REV4)
+		chip->workaround_flag |= WRKARND_PON_OCV_COMP;
+
+	if ((chip->revid_data->pmic_subtype == PM8916_V2P0_SUBTYPE) &&
+				chip->dt.cfg_recalib_vbat)
+		chip->workaround_flag |= WRKARND_RECALIB_VBAT;
+
+	pr_debug("workaround_flag=%lx\n", chip->workaround_flag);
+}
+
 static int qpnp_vm_bms_probe(struct spmi_device *spmi)
 {
 	struct qpnp_bms_chip *chip;
@@ -3301,9 +3444,6 @@ static int qpnp_vm_bms_probe(struct spmi_device *spmi)
 		pr_err("revid error rc = %ld\n", PTR_ERR(chip->revid_data));
 		return -EINVAL;
 	}
-	if ((chip->revid_data->pmic_subtype == PM8916_V2P0_SUBTYPE) &&
-				chip->revid_data->rev4 == PM8916_V2P0_REV4)
-		chip->workaround_flag |= WRKARND_PON_OCV_COMP;
 
 	rc = qpnp_pon_is_warm_reset();
 	if (rc < 0) {
@@ -3339,6 +3479,8 @@ static int qpnp_vm_bms_probe(struct spmi_device *spmi)
 		pr_err("Error reading version register rc=%d\n", rc);
 		return rc;
 	}
+
+	config_bms_wrkarnd(chip);
 
 	pr_debug("BMS version: %hhu.%hhu\n",
 			chip->revision[1], chip->revision[0]);

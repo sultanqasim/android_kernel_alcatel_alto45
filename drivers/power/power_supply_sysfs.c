@@ -190,6 +190,15 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(temp_alert_max),
 	POWER_SUPPLY_ATTR(temp_cool),
 	POWER_SUPPLY_ATTR(temp_warm),
+/* [PLATFORM]-Add-BEGIN by TCTNB.FLF, FR-645055, 2014/07/11, add thermal protect */
+#ifdef CONFIG_TCT_8X16_ALTO45
+	POWER_SUPPLY_ATTR(temp_cold),
+	POWER_SUPPLY_ATTR(temp_overheat),
+/* [PLATFORM]-Mod-BEGIN by TCTNB.FLF, PR-721050, 2014/08/12, fix capacity drops after charging full */
+	POWER_SUPPLY_ATTR(batt_status),
+/* [PLATFORM]-Mod-END by TCTNB.FLF */
+#endif
+/* [PLATFORM]-Add-END by TCTNB.FLF */
 	POWER_SUPPLY_ATTR(temp_ambient),
 	POWER_SUPPLY_ATTR(temp_ambient_alert_min),
 	POWER_SUPPLY_ATTR(temp_ambient_alert_max),
@@ -202,6 +211,7 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(system_temp_level),
 	POWER_SUPPLY_ATTR(resistance),
 	POWER_SUPPLY_ATTR(resistance_capacitive),
+	POWER_SUPPLY_ATTR(recalib_vbat),
 	/* Local extensions */
 	POWER_SUPPLY_ATTR(usb_hc),
 	POWER_SUPPLY_ATTR(usb_otg),

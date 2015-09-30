@@ -1,4 +1,5 @@
-/* Copyright (c) 2014, The Linux Foundation. All rights reserved.
+/*
+ * Copyright (c) 2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -8,22 +9,16 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
  */
 
-#ifndef MSM_CPU_SUBSYS_H_
-#define MSM_CPU_SUBSYS_H_
+#ifndef _AVTIMER_H
+#define _AVTIMER_H
 
-#ifdef CONFIG_MSM_CPU_PWR_CTL
-int msm_unclamp_secondary_arm_cpu_sim(unsigned int cpu);
-int msm_unclamp_secondary_arm_cpu(unsigned int cpu);
-#else
-static inline int msm_unclamp_secondary_arm_cpu_sim(unsigned int cpu)
-{
-	return 0;
-}
-static inline int msm_unclamp_secondary_arm_cpu(unsigned int cpu)
-{
-	return 0;
-}
+#include <uapi/linux/avtimer.h>
+
+int avcs_core_open(void);
+int avcs_core_disable_power_collapse(int disable);/* true or flase */
+int avcs_core_query_timer(uint64_t *avtimer_tick);
+
 #endif
-#endif /*MSM_CPU_SUBSYS_H_*/
