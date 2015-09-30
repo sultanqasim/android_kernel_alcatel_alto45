@@ -250,7 +250,50 @@ static void __iomem *virt_bases[N_BASES];
 		.div_src_val = BVAL(4, 0, (int)(2*(div) - 1)) \
 			| BVAL(10, 8, s##_source_val), \
 	}
-
+/* [PLATFORM]-Add-BEGIN by TCTNB.qijiang.yu, 2014/05/13, flash enable use gp_clk */
+#if defined(CONFIG_TCT_8X16_ALTO45)
+#define F0(f, s, div, m, n) \
+	{ \
+		.freq_hz = (f), \
+		.src_clk = &s##_clk_src.c, \
+		.m_val = (m), \
+		.n_val = ~((n)-(m)) * !!(n), \
+		.d_val = ~(n)-38,\
+		.div_src_val = BVAL(4, 0, (int)(2*(div) - 1)) \
+			| BVAL(10, 8, s##_source_val), \
+	}
+#define F1(f, s, div, m, n) \
+	{ \
+		.freq_hz = (f), \
+		.src_clk = &s##_clk_src.c, \
+		.m_val = (m), \
+		.n_val = ~((n)-(m)) * !!(n), \
+		.d_val = ~(n)-34,\
+		.div_src_val = BVAL(4, 0, (int)(2*(div) - 1)) \
+			| BVAL(10, 8, s##_source_val), \
+	}
+#define F2(f, s, div, m, n) \
+	{ \
+		.freq_hz = (f), \
+		.src_clk = &s##_clk_src.c, \
+		.m_val = (m), \
+		.n_val = ~((n)-(m)) * !!(n), \
+		.d_val = ~(n)-30,\
+		.div_src_val = BVAL(4, 0, (int)(2*(div) - 1)) \
+			| BVAL(10, 8, s##_source_val), \
+	}
+#define F3(f, s, div, m, n) \
+	{ \
+		.freq_hz = (f), \
+		.src_clk = &s##_clk_src.c, \
+		.m_val = (m), \
+		.n_val = ~((n)-(m)) * !!(n), \
+		.d_val = ~(n)-25,\
+		.div_src_val = BVAL(4, 0, (int)(2*(div) - 1)) \
+			| BVAL(10, 8, s##_source_val), \
+	}
+#endif
+/* [PLATFORM]-Add-END by TCTNB.qijiang.yu, 2014/05/13 */
 #define F_MDSS(f, s, div, m, n) \
 	{ \
 		.freq_hz = (f), \
@@ -341,7 +384,9 @@ static DEFINE_VDD_REGULATORS(vdd_sr2_pll, VDD_SR2_PLL_NUM, 2,
 static struct pll_freq_tbl apcs_pll_freq[] = {
 	F_APCS_PLL( 998400000, 52, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1094400000, 57, 0x0, 0x1, 0x0, 0x0, 0x0),
+	F_APCS_PLL(1152000000, 60, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1190400000, 62, 0x0, 0x1, 0x0, 0x0, 0x0),
+	F_APCS_PLL(1209600000, 63, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1248000000, 65, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1401600000, 73, 0x0, 0x1, 0x0, 0x0, 0x0),
 	PLL_F_END
@@ -850,6 +895,14 @@ static struct rcg_clk cci_clk_src = {
 static struct clk_freq_tbl ftbl_gcc_camss_gp0_1_clk[] = {
 	F( 100000000,	   gpll0,   8,	  0,	0),
 	F( 200000000,	   gpll0,   4,	  0,	0),
+/* [PLATFORM]-Add-BEGIN by TCTNB.qijiang.yu, 2014/05/13, flash enable use gp_clk */
+#if defined(CONFIG_TCT_8X16_ALTO45)
+	F0( 24000,  		xo, 	16,   1, 50),
+	F1( 24001, 			xo, 	16,   1, 50),
+	F2( 24002, 			xo, 	16,   1, 50),
+	F3( 24003, 			xo, 	16,   1, 50),
+#endif
+/* [PLATFORM]-Add-END by TCTNB.qijiang.yu, 2014/05/13 */
 	F_END
 };
 

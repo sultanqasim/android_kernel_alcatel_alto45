@@ -1,4 +1,3 @@
-
 /* Copyright (c) 2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -11,11 +10,23 @@
  * GNU General Public License for more details.
  */
 
-#ifndef __MSM_CLOCK_CPU_8939_H
-#define __MSM_CLOCK_CPU_8939_H
+#ifndef __MSM_BUS_RULE_OPS_H
+#define __MSM_BUS_RULE_OPS_H
 
-#define clk_a53ssmux_lc			0x71a9377b
-#define clk_a53ssmux_bc			0xb5983c42
-#define clk_a53ssmux_cci		0x15560bd5
+#define FLD_IB	0
+#define FLD_AB	1
+#define FLD_CLK	2
+
+#define OP_LE	0
+#define OP_LT	1
+#define OP_GE	2
+#define OP_GT	3
+#define OP_NOOP	4
+
+#define RULE_STATE_NOT_APPLIED	0
+#define RULE_STATE_APPLIED	1
+
+#define THROTTLE_ON	0
+#define THROTTLE_OFF	1
 
 #endif
