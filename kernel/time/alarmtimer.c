@@ -26,7 +26,8 @@
 #include <linux/workqueue.h>
 #include <linux/freezer.h>
 
-#define ALARM_DELTA 120
+//[BUGIFX]added by Miao,change 120s to 10s, bug 787293
+#define ALARM_DELTA 10
 
 /**
  * struct alarm_base - Alarm timer bases

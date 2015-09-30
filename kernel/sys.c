@@ -129,6 +129,12 @@ EXPORT_SYMBOL(cad_pid);
 
 void (*pm_power_off_prepare)(void);
 
+/*[BUGFIX]-Add Begin by TCTSZ.LuZhi,2014/5/19,PR-678927,LCD white screen when power off */
+#if defined(CONFIG_TCT_8X16_ALTO45)
+extern void mdss_dsi_panel_bl_off(void);
+#endif
+/*[BUGFIX]-Add End by TCTSZ.LuZhi,2014/5/19,PR-678927,LCD white screen when power off */
+
 /*
  * Returns true if current's euid is same as p's uid or euid,
  * or has CAP_SYS_NICE to p's user_ns.
@@ -413,6 +419,12 @@ static void kernel_shutdown_prepare(enum system_states state)
 		(state == SYSTEM_HALT)?SYS_HALT:SYS_POWER_OFF, NULL);
 	system_state = state;
 	usermodehelper_disable();
+
+/*[BUGFIX]-Add Begin by TCTSZ.LuZhi,2014/5/19,PR-678927,LCD white screen when power off */
+#if defined(CONFIG_TCT_8X16_ALTO45)
+	mdss_dsi_panel_bl_off();
+#endif
+/*[BUGFIX]-Add End by TCTSZ.LuZhi,2014/5/19,PR-678927,LCD white screen when power off */
 	device_shutdown();
 }
 /**
