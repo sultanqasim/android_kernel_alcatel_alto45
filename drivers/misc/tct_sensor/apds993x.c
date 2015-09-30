@@ -105,6 +105,8 @@
 #define APDS993X_PDATAL_REG	0x18
 #define APDS993X_PDATAH_REG	0x19
 
+#define APDS993X_POFFSET_REG	0x1E
+
 #define CMD_BYTE		0x80
 #define CMD_WORD		0xA0
 #define CMD_SPECIAL		0xE0
@@ -241,6 +243,7 @@ struct apds993x_data {
 	unsigned int config;
 	unsigned int ppcount;
 	unsigned int control;
+	unsigned int poffset;
 
 	/* control flag from HAL */
 	unsigned int enable_ps_sensor;
@@ -259,6 +262,10 @@ struct apds993x_data {
 	unsigned int cross_talk;		/* cross_talk value */
 	unsigned int avg_cross_talk;		/* average cross_talk  */
 	unsigned int ps_cal_result;		/* result of calibration*/
+#if defined(PSENSOR_FAC_CALIBRATION) || defined(PSENSOR_PHONE_CALIBRATION)
+	unsigned int fac_crosstalk;
+	int pcal_passed;
+#endif
 
 	/* ALS parameters */
 	unsigned int als_threshold_l;	/* low threshold */
@@ -271,6 +278,11 @@ struct apds993x_data {
 	unsigned int als_atime_index;	/* storage for als integratiion time */
 	unsigned int als_again_index;	/* storage for als GAIN */
 	unsigned int als_reduce;	/* flag indicate ALS 6x reduction */
+
+/* [FEATURE]-MOD-BEGIN by TCTNB.YJ, 2014/08/05, sensor HAL mod by TCTNB, PR-746189, flash black screen when making first call */
+	int active_ps_first;
+	int ps_phonecal_on;
+/* [FEATURE]-MOD-END by TCTNB.YJ */
 };
 
 static struct sensors_classdev sensors_light_cdev = {
@@ -332,6 +344,15 @@ static int apds993x_ga = 0;
 static int apds993x_coe_b = 0;
 static int apds993x_coe_c = 0;
 static int apds993x_coe_d = 0;
+
+/* [FEATURE] Add Begin by TCT-NB.YJ 18/06/2014 */
+#if defined(PSENSOR_FAC_CALIBRATION)
+static char ps_fac_param[30] = "ps_fac_param";
+static int ps_fac_val[4];
+static struct class * apds_cal_class;
+static struct device * apds_cal_dev;
+#endif
+/* [FEATURE] Add End by TCT-NB.YJ*/
 
 #ifdef ALS_POLLING_ENABLED
 static int apds993x_set_als_poll_delay(struct i2c_client *client, unsigned int val);
@@ -543,6 +564,24 @@ static int apds993x_set_control(struct i2c_client *client, int control)
 	return ret;
 }
 
+static int apds993x_set_poffset(struct i2c_client *client, unsigned int ppcount)
+{
+	struct apds993x_data *data = i2c_get_clientdata(client);
+	int ret;
+
+	mutex_lock(&data->update_lock);
+	ret = i2c_smbus_write_byte_data(client,
+			CMD_BYTE|APDS993X_POFFSET_REG, ppcount);
+	mutex_unlock(&data->update_lock);
+
+	data->poffset = ppcount;
+
+	return ret;
+}
+
+
+/* [FEATURE] Add Begin by TCT-NB.YJ 18/06/2014 */
+#ifndef PSENSOR_FAC_CALIBRATION
 /*calibration*/
 void apds993x_swap(int *x, int *y)
 {
@@ -639,6 +678,8 @@ RECALIBRATION:
 	/* Save the cross-talk to the non-volitile memory in the phone  */
 	return data->cross_talk;
 }
+#endif
+/* [FEATURE] Add End by TCT-NB.YJ*/
 
 /* apply the Cross-talk value to threshold */
 static void apds993x_set_ps_threshold_adding_cross_talk(
@@ -661,8 +702,97 @@ static void apds993x_set_ps_threshold_adding_cross_talk(
 		data->ps_hysteresis_threshold =
 			data->ps_threshold - SUB_FROM_PS_THRESHOLD;
 	}
-	pr_info("%s: configurations are set\n", __func__);
+//	pr_info("%s: configurations are set\n", __func__);
 }
+
+/* [FEATURE] Add Begin by TCT-NB.YJ 18/06/2014 */
+#if defined(PSENSOR_FAC_CALIBRATION)
+    #define CALIBRATED_TOKEN 0x0CA0
+    #define CAL_PULSE_COUNT_LOW 6
+    #define CAL_PULSE_COUNT_HIGH 40
+    #define CAL_PULSE_COUNT 20
+    #define ALS_COMP 1
+    #define P_OFFSET 0x00
+    #define SNS_DD_APDS99XX_PRX_CAL_THRESHOLD_HI 500
+    #define SNS_DD_APDS99XX_PRX_CAL_THRESHOLD_LO 5
+    #define PRX_HI_COMPENSATION 300
+    #define PRX_LO_COMPENSATION 200
+    #define BOOT_CAL_ON 1
+    #define PHONE_CAL_ON 1
+
+static int apds993x_crosstalk_calibration_test(struct i2c_client *client)
+{
+	struct apds993x_data *data = i2c_get_clientdata(client);
+	unsigned int sum_of_pdata = 0;
+	int i, ret =0;
+
+	unsigned int atime, ptime, wtime, oldpulse, ppulse, avpdata;
+	unsigned int renable;
+
+	pr_info("%s: START proximity sensor calibration\n", __func__);
+
+	mutex_lock(&data->update_lock);
+	renable = i2c_smbus_read_byte_data(data->client, CMD_BYTE|APDS993X_ENABLE_REG);
+	atime = i2c_smbus_read_byte_data(client, CMD_BYTE|APDS993X_ATIME_REG);
+	ptime = i2c_smbus_read_byte_data(client, CMD_BYTE|APDS993X_PTIME_REG);
+	wtime = i2c_smbus_read_byte_data(client, CMD_BYTE|APDS993X_WTIME_REG);
+	oldpulse = i2c_smbus_read_byte_data(client, CMD_BYTE|APDS993X_PPCOUNT_REG);
+	mutex_unlock(&data->update_lock);
+
+printk(">>-- %s renable=%x, atime=%x, ptime=%x, wtiem=%x \n", __func__, renable, atime, ptime, wtime);
+	apds993x_set_enable(client, 0x0D);/* Enable PS and Wait */
+
+	avpdata = 0;
+	ppulse = CAL_PULSE_COUNT;
+
+	while ((avpdata > SNS_DD_APDS99XX_PRX_CAL_THRESHOLD_HI) ||
+		(avpdata < SNS_DD_APDS99XX_PRX_CAL_THRESHOLD_LO)) {
+
+		sum_of_pdata = 0;
+	       apds993x_set_ppcount(client, ppulse);
+		for (i = 0; i < 10; i++) {
+			mdelay(60);
+			mutex_lock(&data->update_lock);
+			sum_of_pdata += i2c_smbus_read_word_data(client,
+					CMD_WORD|APDS993X_PDATAL_REG);
+			mutex_unlock(&data->update_lock);
+		}
+
+		avpdata = sum_of_pdata/10;
+
+		if (avpdata > SNS_DD_APDS99XX_PRX_CAL_THRESHOLD_HI)
+			ppulse --;
+		else if (avpdata < SNS_DD_APDS99XX_PRX_CAL_THRESHOLD_LO)
+			ppulse ++;
+		else
+			break;
+
+		if ( ppulse < CAL_PULSE_COUNT_LOW ) {
+		       apds993x_set_ppcount(client, oldpulse);
+			ret = 3;
+			break;
+		} else if ( ppulse > CAL_PULSE_COUNT_HIGH ) {
+		       apds993x_set_ppcount(client, oldpulse);
+			ret = 4;
+			break;
+		}
+
+	}
+
+	apds993x_set_enable(client, renable); /* Power Off */
+
+	if (0 == ret) {
+		data->ppcount= ppulse;
+		data->cross_talk = avpdata;
+
+		printk(">>-- %s: pulse=%d, sum_of_pdata = %d   cross_talk = %d\n",
+				__func__, ppulse, sum_of_pdata, data->cross_talk);
+	}
+
+	return ret;
+}
+#endif
+/* [FEATURE] Add End by TCT-NB.YJ*/
 
 static int LuxCalculation(struct i2c_client *client, int ch0data, int ch1data)
 {
@@ -733,7 +863,7 @@ static void apds993x_change_ps_threshold(struct i2c_client *client)
 		data->pilt = data->ps_hysteresis_threshold;
 		data->piht = 1023;
 
-		pr_info("%s: far-to-near\n", __func__);
+//		pr_info("%s: far-to-near\n", __func__);
 	} else if ((data->ps_data <= data->pilt) &&
 			(data->ps_data < data->piht)) {
 		/* near-to-far detected */
@@ -752,7 +882,7 @@ static void apds993x_change_ps_threshold(struct i2c_client *client)
 		data->pilt = 0;
 		data->piht = data->ps_threshold;
 
-		pr_info("%s: near-to-far\n", __func__);
+//		pr_info("%s: near-to-far\n", __func__);
 	}
 }
 
@@ -898,6 +1028,19 @@ static void apds993x_reschedule_work(struct apds993x_data *data,
 	queue_delayed_work(apds993x_workqueue, &data->dwork, delay);
 }
 
+/* [FEATURE] Add Begin by TCT-NB.YJ, 28/06/2014 */
+#if defined(ALS_COMPENSATION)
+static void apds_als_compensation(int *Lux)
+{
+	int temp = 0;
+	if (*Lux < 600){
+		temp = *Lux * 24;
+		*Lux = temp / 10;
+	} else {
+		*Lux += 840;
+	}
+}
+#endif
 
 #ifdef ALS_POLLING_ENABLED
 /* ALS polling routine */
@@ -906,7 +1049,11 @@ static void apds993x_als_polling_work_handler(struct work_struct *work)
 	struct apds993x_data *data = container_of(work,
 			struct apds993x_data, als_dwork.work);
 	struct i2c_client *client=data->client;
+#ifdef ALS_HELP_PS
 	int ch0data, ch1data, pdata, v;
+#else
+	int ch0data, ch1data, pdata;
+#endif
 	int luxValue=0;
 	int err;
 	unsigned char change_again=0;
@@ -919,6 +1066,11 @@ static void apds993x_als_polling_work_handler(struct work_struct *work)
 			CMD_WORD|APDS993X_CH1DATAL_REG);
 	pdata = i2c_smbus_read_word_data(client,
 			CMD_WORD|APDS993X_PDATAL_REG);
+
+#if defined(ALS_COMPENSATION)
+	ch0data *= 7;
+	ch1data *= 2;
+#endif
 
 	luxValue = LuxCalculation(client, ch0data, ch1data);
 
@@ -943,7 +1095,7 @@ static void apds993x_als_polling_work_handler(struct work_struct *work)
 			apds993x_als_again_tb[data->als_again_index],
 			data->als_reduce);
 	*/
-
+#ifdef ALS_HELP_PS
 	/*
 	 * check PS under sunlight
 	 * PS was previously in far-to-near condition
@@ -970,8 +1122,12 @@ static void apds993x_als_polling_work_handler(struct work_struct *work)
 
 		pr_info("%s: FAR\n", __func__);
 	}
+#endif
 
 	if (lux_is_valid) {
+#if defined(ALS_COMPENSATION)
+		apds_als_compensation(&luxValue);
+#endif
 		/* report the lux level */
 		input_report_abs(data->input_dev_als, ABS_MISC, luxValue);
 		input_sync(data->input_dev_als);
@@ -1021,6 +1177,7 @@ static void apds993x_als_polling_work_handler(struct work_struct *work)
 			&data->als_dwork, msecs_to_jiffies(data->als_poll_delay));
 }
 #endif /* ALS_POLLING_ENABLED */
+/* [FEATURE] Add End by TCT-NB.YJ*/
 
 /* PS interrupt routine */
 static void apds993x_work_handler(struct work_struct *work)
@@ -1061,6 +1218,7 @@ static void apds993x_work_handler(struct work_struct *work)
 	} else if ((status & enable & 0x20) == 0x20) {
 		/* only PS is interrupted */
 
+#ifdef ALS_HELP_PS
 		/* check if this is triggered by background ambient noise */
 		ch0data = i2c_smbus_read_word_data(client,
 				CMD_WORD|APDS993X_CH0DATAL_REG);
@@ -1074,7 +1232,9 @@ static void apds993x_work_handler(struct work_struct *work)
 				pr_info("%s: background ambient noise\n",
 						__func__);
 		}
-
+#else
+			apds993x_change_ps_threshold(client);
+#endif
 		/* 0 = CMD_CLR_PS_INT */
 		apds993x_set_command(client, 0);
 	} else if ((status & enable & 0x10) == 0x10) {
@@ -1261,6 +1421,75 @@ static int apds993x_set_als_poll_delay(struct i2c_client *client,
 }
 #endif
 
+
+/* [FEATURE] Add Begin by TCT-NB.YJ 18/06/2014 */
+#if defined(PSENSOR_PHONE_CALIBRATION)
+static int psensor_phone_calibration(struct apds993x_data *data)
+{
+	unsigned int renable, ratime, rptime, rwtime, i2c_data;
+	int i, ipdata, sum_pdata = 0;
+
+	mutex_lock(&data->update_lock);
+	renable = i2c_smbus_read_byte_data(data->client, CMD_BYTE|APDS993X_ENABLE_REG);
+	ratime = i2c_smbus_read_byte_data(data->client, CMD_BYTE|APDS993X_ATIME_REG);
+	rptime = i2c_smbus_read_byte_data(data->client, CMD_BYTE|APDS993X_PTIME_REG);
+	rwtime = i2c_smbus_read_byte_data(data->client, CMD_BYTE|APDS993X_WTIME_REG);
+	mutex_unlock(&data->update_lock);
+
+	/* enable Proximity & Power ON*/
+	i2c_data = 0x05;
+	apds993x_set_enable(data->client, i2c_data);
+
+/* algorithm start ! */
+	i2c_data = 0xFF;
+	apds993x_set_atime(data->client, i2c_data);
+	apds993x_set_ptime(data->client, i2c_data);
+	apds993x_set_wtime(data->client, i2c_data);
+
+	for (i = 0; i < 5; i ++) {
+		msleep(10);
+		ipdata = i2c_smbus_read_word_data(data->client, CMD_WORD|APDS993X_PDATAL_REG);
+		sum_pdata += ipdata;
+	}
+
+	sum_pdata = sum_pdata /5;
+
+	if ( (sum_pdata > data->fac_crosstalk) && (sum_pdata <= 1000 - ADD_TO_CROSS_TALK) ){
+		data->cross_talk = sum_pdata;
+		apds993x_set_ps_threshold_adding_cross_talk(data->client, data->cross_talk);
+
+		data->pcal_passed = 1;
+		apds993x_ps_detection_threshold = data->ps_threshold;
+		apds993x_ps_hsyteresis_threshold = data->ps_hysteresis_threshold;
+	}
+	else if ( (sum_pdata <= data->fac_crosstalk) && (0 == data->pcal_passed) ) {
+		apds993x_ps_detection_threshold = ps_fac_val[0];
+		apds993x_ps_hsyteresis_threshold = ps_fac_val[1];
+		data->cross_talk = data->fac_crosstalk;
+
+		apds993x_set_ps_threshold_adding_cross_talk(data->client, data->cross_talk);
+	}
+	else if ( (sum_pdata > 1000 - ADD_TO_CROSS_TALK) && (0 == data->pcal_passed) ) {
+		apds993x_ps_detection_threshold = 900;
+		apds993x_ps_hsyteresis_threshold = 800;
+		data->cross_talk = apds993x_ps_detection_threshold - ADD_TO_CROSS_TALK;
+
+		apds993x_set_ps_threshold_adding_cross_talk(data->client, data->cross_talk);
+	}
+
+	apds993x_set_atime(data->client, ratime);
+	apds993x_set_ptime(data->client, rptime);
+	apds993x_set_wtime(data->client, rwtime);
+
+	apds993x_set_enable(data->client, renable);
+
+	printk("%s renable=%x, ratime=%x, rptime=%x, rwtime=%x, sum_pdata=%d\n",
+		__func__, renable, ratime, rptime, rwtime, sum_pdata);
+
+	return 0;
+}
+#endif
+
 static int apds993x_enable_ps_sensor(struct i2c_client *client, int val)
 {
 	struct apds993x_data *data = i2c_get_clientdata(client);
@@ -1291,6 +1520,13 @@ static int apds993x_enable_ps_sensor(struct i2c_client *client, int val)
 
 		if (data->enable_ps_sensor==0) {
 			data->enable_ps_sensor= 1;
+
+#if defined(PSENSOR_PHONE_CALIBRATION)
+		if (1 == data->ps_phonecal_on) {
+			psensor_phone_calibration(data);
+		}
+		data->ps_phonecal_on = 1;
+#endif
 
 			/* Power Off */
 			apds993x_set_enable(client,0);
@@ -1324,6 +1560,13 @@ static int apds993x_enable_ps_sensor(struct i2c_client *client, int val)
 				irq_set_irq_wake(client->irq, 1);
 #endif
 			}
+/* [FEATURE]-MOD-BEGIN by TCTNB.YJ, 2014/08/05, sensor HAL mod by TCTNB, PR-746189, flash black screen when making first call */
+			if (0 == data->active_ps_first) {
+				input_report_abs(data->input_dev_ps, ABS_DISTANCE, 1);
+				input_sync(data->input_dev_ps);
+				data->active_ps_first = 1;
+			}
+/* [FEATURE]-MOD-END by TCTNB.YJ */
 		}
 	} else {
 		/*
@@ -1392,6 +1635,7 @@ static int apds993x_enable_ps_sensor(struct i2c_client *client, int val)
 
 	return 0;
 }
+/* [FEATURE] Add End by TCT-NB.YJ*/
 
 static int apds993x_ps_open(struct inode *inode, struct file *file)
 {
@@ -1421,6 +1665,12 @@ static long apds993x_ps_ioctl(struct file *file,
 
 	client = apds993x_i2c_client;
 	data = i2c_get_clientdata(apds993x_i2c_client);
+
+/* [FEATURE] Add Begin by TCT-NB.YJ 18/06/2014 */
+#if defined(PSENSOR_FAC_CALIBRATION)
+	return 0;
+#endif
+/* [FEATURE] Add End by TCT-NB.YJ*/
 
 	switch (cmd) {
 	case APDS993X_IOCTL_PS_ENABLE:
@@ -1502,6 +1752,12 @@ static long apds993x_als_ioctl(struct file *file,
 
 	client = apds993x_i2c_client;
 	data = i2c_get_clientdata(apds993x_i2c_client);
+
+/* [FEATURE] Add Begin by TCT-NB.YJ 18/06/2014 */
+#if defined(PSENSOR_FAC_CALIBRATION)
+	return 0;
+#endif
+/* [FEATURE] Add End by TCT-NB.YJ*/
 
 	switch (cmd) {
 	case APDS993X_IOCTL_ALS_ENABLE:
@@ -1653,6 +1909,309 @@ static ssize_t apds993x_show_status(struct device *dev,
 
 static DEVICE_ATTR(status, S_IRUSR | S_IRGRP, apds993x_show_status, NULL);
 
+/* [FEATURE] Add Begin by TCT-NB.YJ 18/06/2014 */
+#if defined(PSENSOR_FAC_CALIBRATION)
+static ssize_t apds993x_show_ppulse(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct apds993x_data *data = i2c_get_clientdata(client);
+	int ppulse;
+
+	mutex_lock(&data->update_lock);
+	ppulse = i2c_smbus_read_byte_data(client, CMD_BYTE|APDS993X_PPCOUNT_REG);
+	mutex_unlock(&data->update_lock);
+
+	return sprintf(buf, "%d\n", ppulse);
+}
+
+static DEVICE_ATTR(ppulse, S_IRUSR | S_IRGRP, apds993x_show_ppulse, NULL);
+
+static ssize_t apds993x_show_poffset(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct apds993x_data *data = i2c_get_clientdata(client);
+	int poffset;
+
+	mutex_lock(&data->update_lock);
+	poffset = i2c_smbus_read_byte_data(client, CMD_BYTE|APDS993X_POFFSET_REG);
+	mutex_unlock(&data->update_lock);
+
+	return sprintf(buf, "%d\n", poffset);
+}
+
+static DEVICE_ATTR(poffset, S_IRUSR | S_IRGRP, apds993x_show_poffset, NULL);
+
+static ssize_t apds993x_show_pilt(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct apds993x_data *data = i2c_get_clientdata(client);
+	int pilt;
+
+	mutex_lock(&data->update_lock);
+	pilt = i2c_smbus_read_word_data(client, CMD_WORD|APDS993X_PILTL_REG);
+	mutex_unlock(&data->update_lock);
+
+	return sprintf(buf, "%d\n", pilt);
+}
+
+static DEVICE_ATTR(pilt, S_IRUGO, apds993x_show_pilt, NULL);
+
+static ssize_t apds993x_show_piht(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct apds993x_data *data = i2c_get_clientdata(client);
+	int piht;
+
+	mutex_lock(&data->update_lock);
+	piht = i2c_smbus_read_word_data(client, CMD_WORD|APDS993X_PIHTL_REG);
+	mutex_unlock(&data->update_lock);
+
+	return sprintf(buf, "%d\n", piht);
+}
+
+static DEVICE_ATTR(piht, S_IRUGO, apds993x_show_piht, NULL);
+
+static ssize_t apds993x_show_ps_fac_cal(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct apds993x_data *data = dev_get_drvdata(dev);
+
+	return snprintf(buf, 100, "%d,%d,%d,%d. cross_talk=%d\n",
+		data->ps_cal_result, data->ps_threshold, data->ps_hysteresis_threshold, data->ppcount, data->cross_talk);
+}
+
+static ssize_t apds993x_store_ps_fac_cal(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct apds993x_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+	int ret = 0;
+	unsigned long val = 0;
+
+	data->ps_cal_result = 1;
+
+	ret = kstrtoul(buf, 10, &val);
+	if (ret) {
+		printk("get cmd from buf error, ret=%d \n", ret);
+		return ret;
+	}
+
+	if (1 == val) {
+		/* start calibration */
+		ret = apds993x_crosstalk_calibration_test(client);
+
+		/* set threshold for near/far status */
+		if (0 == ret) {
+			data->ps_threshold = data->cross_talk + ADD_TO_CROSS_TALK;
+			data->ps_hysteresis_threshold =
+				data->ps_threshold - SUB_FROM_PS_THRESHOLD;
+
+			data->pcal_passed = 1;
+
+			apds993x_ps_detection_threshold = data->ps_threshold;
+			apds993x_ps_hsyteresis_threshold = data->ps_hysteresis_threshold;
+			apds993x_ps_pulse_number = data->ppcount;
+		}
+
+		printk("%s: [detect][release][pulse][crotalk] = [%d][%d][%d][%d]\n", __func__,
+			data->ps_threshold, data->ps_hysteresis_threshold, data->ppcount, data->cross_talk);
+	}
+
+
+	data->ps_cal_result = ret;
+
+	return count;
+}
+
+static DEVICE_ATTR(ps_fac_cal,  S_IWUSR | S_IWGRP | S_IRUGO,
+		apds993x_show_ps_fac_cal,
+		apds993x_store_ps_fac_cal);
+
+static ssize_t apds993x_show_ps_fac_param(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct apds993x_data *data = dev_get_drvdata(dev);
+
+	return snprintf(buf, 100, "ps_fac_vals=%d,%d,%d,%d. ps_fac_param=%s) fac_crosstalk=%d\n",
+			ps_fac_val[0], ps_fac_val[1], ps_fac_val[2], ps_fac_val[3], ps_fac_param, data->fac_crosstalk);
+}
+
+static int chartoint(const char *strs)
+{
+       int val = 0;
+
+	if (NULL == strs)
+		return -1;
+
+	while (strs)
+	{
+               switch (*strs) {
+               case '0' ... '9':
+                       val = 10*val+(*strs-'0');
+                       break;
+               default:
+                       return val;
+               }
+		strs ++;
+       }
+
+	return val;
+}
+
+int get_nparams_from_string(char *bufreg, int *valbuf, int valnum)
+{
+       int ret, vi, params = 0;
+       char *str_p = NULL;
+       char *str_q = NULL;
+
+	ret = 0;
+/* calulate how many params from bufreg */
+       str_p = bufreg;
+
+       if(strlen(bufreg) > 0) {
+               params = 1;
+               while( (str_q = strchr(str_p, ',')) != NULL) {
+                       str_p = str_q + 1;
+                       params ++;
+               }
+       }
+
+       printk(">>-- fa_cal params number in bufreg = %d \n", params);
+
+/* check if the number of params in the string bufreg is greater than the number of the values to get */
+	if (params >= valnum) {
+		params = valnum;
+	} else {
+		return -1;
+	}
+
+/* get the params from bufreg */
+       if(params > 0) {
+               str_p = bufreg;
+               for(vi = 0; vi < params; vi ++) {
+                       valbuf[vi] = chartoint(str_p);
+
+       /* the number of the parameters is "params", but the number
+       of the comma is "params - 1"  */
+                       if(vi < params -1) {
+                               str_q = strchr(str_p, ',');
+                               str_p = str_q + 1;
+                       }
+                       printk(">>-- fa_cal params[%d] in bufreg = %d \n", vi, valbuf[vi]);
+               }
+       }
+       str_q = NULL;
+       str_p = NULL;
+
+	return ret;
+}
+
+
+static ssize_t apds993x_store_ps_fac_param(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct apds993x_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+
+	int ret = 0;
+
+	if ( buf ) {
+		memset(ps_fac_param, 0, sizeof(ps_fac_param));
+
+		strncpy(ps_fac_param, buf, sizeof(ps_fac_param) - 1);
+
+		ret = get_nparams_from_string(ps_fac_param, ps_fac_val, sizeof(ps_fac_val)/sizeof(int));
+
+		if ((0 == ret) && (CALIBRATED_TOKEN == ps_fac_val[3]) ){
+			data->ps_threshold = ps_fac_val[0];
+			data->ps_hysteresis_threshold = ps_fac_val[1];
+			data->ppcount = ps_fac_val[2];
+			data->fac_crosstalk = data->ps_threshold - ADD_TO_CROSS_TALK;
+			data->cross_talk = data->fac_crosstalk;
+
+			apds993x_ps_detection_threshold = data->ps_threshold;
+			apds993x_ps_hsyteresis_threshold = data->ps_hysteresis_threshold;
+			apds993x_ps_pulse_number = data->ppcount;
+
+			ret = apds993x_set_ppcount(client, data->ppcount);
+			if (ret < 0) {
+				printk(">>-- set_ppcount failed %d\n", ret);
+			}
+
+		}
+	}
+
+	return count;
+}
+
+static DEVICE_ATTR(ps_fac_param,  S_IWUSR | S_IWGRP | S_IRUGO,
+		apds993x_show_ps_fac_param,
+		apds993x_store_ps_fac_param);
+
+static ssize_t apds993x_show_ps_phonecal_switch(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct apds993x_data *data = dev_get_drvdata(dev);
+
+	return snprintf(buf, 100, "ps_phonecal_on=%d\n", data->ps_phonecal_on);
+}
+
+static ssize_t apds993x_store_ps_phonecal_switch(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct apds993x_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+	client = client;
+
+	if (!strncmp(buf, "on", 2)) {
+		data->ps_phonecal_on = 1;
+	} else
+	if (!strncmp(buf, "off", 3)) {
+		data->ps_phonecal_on = 0;
+	}
+printk(">>-- %s line%d buf=%s \n", __func__, __LINE__, buf);
+	return count;
+}
+
+static DEVICE_ATTR(ps_phonecal_switch,  S_IWUSR | S_IWGRP | S_IRUGO,
+		apds993x_show_ps_phonecal_switch,
+		apds993x_store_ps_phonecal_switch);
+
+void apds_fac_cal_register ( struct apds993x_data *data)
+{
+	int rc = 0;
+	apds_cal_class = class_create(THIS_MODULE, "apds_cal");
+	if (IS_ERR(apds_cal_class))
+		pr_err("Failed to create class(apds_cal_class)!\n");
+
+	apds_cal_dev = device_create(apds_cal_class, NULL, 0, NULL, "ps_device");
+	if (IS_ERR(apds_cal_dev))
+		pr_err("Failed to create device(apds_cal_dev)!\n");
+
+	// tp_gesture
+	rc = device_create_file(apds_cal_dev, &dev_attr_ps_fac_cal);
+	if ( rc < 0)
+		pr_err("Failed to create device file(%s)!\n", dev_attr_ps_fac_cal.attr.name);
+
+	rc = device_create_file(apds_cal_dev, &dev_attr_ps_fac_param);
+	if ( rc < 0)
+		pr_err("Failed to create device file(%s)!\n", dev_attr_ps_fac_param.attr.name);
+
+	rc = device_create_file(apds_cal_dev, &dev_attr_ps_phonecal_switch);
+	if ( rc < 0)
+		pr_err("Failed to create device file(%s)!\n", dev_attr_ps_phonecal_switch.attr.name);
+
+	dev_set_drvdata(apds_cal_dev, data);
+//	dev_set_drvdata(lcd_ce_dev, NULL);
+
+}
+
+#else
+
 static ssize_t apds993x_show_ps_run_calibration(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
@@ -1692,6 +2251,9 @@ static DEVICE_ATTR(ps_run_calibration,  S_IWUSR | S_IWGRP | S_IRUGO,
 		apds993x_show_ps_run_calibration,
 		apds993x_store_ps_run_calibration);
 
+#endif
+/* [FEATURE] Add End by TCT-NB.YJ*/
+
 static ssize_t apds993x_show_ps_default_crosstalk(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -1727,13 +2289,15 @@ static ssize_t apds993x_show_ps_cal_result(struct device *dev,
 	struct i2c_client *client = to_i2c_client(dev);
 	struct apds993x_data *data = i2c_get_clientdata(client);
 
-	return sprintf(buf, "%d\n", data->ps_cal_result);
+	return sprintf(buf, "ps_cal_result=%d, pcal_passed=%d \n", data->ps_cal_result, data->pcal_passed);
 }
 
 static DEVICE_ATTR(ps_cal_result, S_IRUGO, apds993x_show_ps_cal_result, NULL);
 /*calibration sysfs end*/
 
+/* [FEATURE] Add Begin by TCT-NB.YJ 18/06/2014 */
 #ifdef APDS993X_HAL_USE_SYS_ENABLE
+   #ifndef PSENSOR_FAC_CALIBRATION
 static ssize_t apds993x_show_enable_ps_sensor(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
@@ -1791,6 +2355,7 @@ static ssize_t apds993x_store_enable_als_sensor(struct device *dev,
 
 	return count;
 }
+   #endif
 
 static int apds993x_als_set_enable(struct sensors_classdev *sensors_cdev,
 		unsigned int enable)
@@ -1820,6 +2385,7 @@ static int apds993x_ps_set_enable(struct sensors_classdev *sensors_cdev,
 	return apds993x_enable_ps_sensor(data->client, enable);
 }
 
+   #ifndef PSENSOR_FAC_CALIBRATION
 static DEVICE_ATTR(enable_als_sensor, S_IWUSR | S_IWGRP | S_IRUGO,
 		apds993x_show_enable_als_sensor,
 		apds993x_store_enable_als_sensor);
@@ -1846,6 +2412,7 @@ static ssize_t apds993x_store_als_poll_delay(struct device *dev,
 
 	return count;
 }
+   #endif
 
 #ifdef ALS_POLLING_ENABLED
 static int apds993x_als_poll_delay(struct sensors_classdev *sensors_cdev,
@@ -1864,8 +2431,10 @@ static int apds993x_als_poll_delay(struct sensors_classdev *sensors_cdev,
 }
 #endif
 
+   #ifndef PSENSOR_FAC_CALIBRATION
 static DEVICE_ATTR(als_poll_delay, S_IWUSR | S_IRUGO,
 		apds993x_show_als_poll_delay, apds993x_store_als_poll_delay);
+   #endif
 
 #endif
 
@@ -1874,17 +2443,27 @@ static struct attribute *apds993x_attributes[] = {
 	&dev_attr_ch1data.attr,
 	&dev_attr_pdata.attr,
 #ifdef APDS993X_HAL_USE_SYS_ENABLE
+   #ifndef PSENSOR_FAC_CALIBRATION
 	&dev_attr_enable_ps_sensor.attr,
 	&dev_attr_enable_als_sensor.attr,
 	&dev_attr_als_poll_delay.attr,
+   #endif
 #endif
 	/*calibration*/
 	&dev_attr_status.attr,
+#if defined(PSENSOR_FAC_CALIBRATION)
+	&dev_attr_poffset.attr,
+	&dev_attr_ppulse.attr,
+	&dev_attr_pilt.attr,
+	&dev_attr_piht.attr,
+#else
 	&dev_attr_ps_run_calibration.attr,
+#endif
 	&dev_attr_ps_default_crosstalk.attr,
 	&dev_attr_ps_cal_result.attr,
 	NULL
 };
+/* [FEATURE] Add End by TCT-NB.YJ*/
 
 static const struct attribute_group apds993x_attr_group = {
 	.attrs = apds993x_attributes,
@@ -1997,6 +2576,13 @@ static int apds993x_init_device(struct i2c_client *client)
 	err = apds993x_set_piht(client, apds993x_ps_detection_threshold);
 	if (err < 0)
 		return err;
+
+	/* init offset for proximity */
+	err = apds993x_set_poffset(client, 0);
+	if (err < 0) {
+		printk(">>-- %s init offset error %d \n", __func__, err);
+		return err;
+	}
 
 	/*calirbation*/
 	apds993x_set_ps_threshold_adding_cross_talk(client, data->cross_talk);
@@ -2477,6 +3063,9 @@ static int apds993x_probe(struct i2c_client *client,
 	data->als_reduce = 0;	// no ALS 6x reduction
 	data->als_prev_lux = 0;
 
+	data->ps_phonecal_on = 1;
+	data->pcal_passed = 0;
+
 	/* calibration */
 	if (apds993x_cross_talk_val > 0 && apds993x_cross_talk_val < 1000) {
 		data->cross_talk = apds993x_cross_talk_val;
@@ -2604,6 +3193,12 @@ static int apds993x_probe(struct i2c_client *client,
 
 	if (pdata->power_on)
 		err = pdata->power_on(false);
+
+/* [FEATURE] Add Begin by TCT-NB.YJ 18/06/2014 */
+#if defined(PSENSOR_FAC_CALIBRATION)
+	apds_fac_cal_register(data);
+#endif
+/* [FEATURE] Add End by TCT-NB.YJ*/
 
 	pr_info("%s: Support ver. %s enabled\n", __func__, DRIVER_VERSION);
 

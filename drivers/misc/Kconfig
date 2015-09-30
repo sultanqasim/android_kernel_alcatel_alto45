@@ -619,6 +619,15 @@ config APQ8084_DOCKING_STATION
 	  This option enables support for the USB and Ethernet ports found on
 	  the QTI APQ8084 Docking Station.
 
+# [FEATURE]-Add-BEGIN by TCTNB.XQJ, 2014/03/24, FR623145, Add NFC function,trnasplant from 8926
+config PN547_I2C
+       tristate "NXP NFC PN547 driver"
+       depends on I2C
+       default n
+       help
+         Provides functionality for NFC.
+#[FEATURE]-Add-END by TCTNB.XQJ
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
@@ -629,4 +638,8 @@ source "drivers/misc/altera-stapl/Kconfig"
 source "drivers/misc/mei/Kconfig"
 source "drivers/misc/vmw_vmci/Kconfig"
 source "drivers/misc/qcom/Kconfig"
+# [PLATFORM]-Mod-BEGIN by TCTNB.YJ, 2014/04/11, add sensor driver.
+source "drivers/misc/tct_sensor/Kconfig"
+# [PLATFORM]-Mod-END by TCTNB.YJ
+
 endmenu

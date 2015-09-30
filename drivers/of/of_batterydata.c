@@ -341,6 +341,9 @@ int of_batterydata_read_data(struct device_node *batterydata_container_node,
 		}
 	}
 
+	pr_err("%s: batt_id_uv = %d, batt_id_kohm = %d, best_id_kohm = %d\n",
+			__func__, batt_id_uv, batt_id_kohm, best_id_kohm);
+
 	if (best_node == NULL) {
 		pr_err("No battery data found\n");
 		return -ENODATA;
@@ -348,9 +351,9 @@ int of_batterydata_read_data(struct device_node *batterydata_container_node,
 	rc = of_property_read_string(best_node, "qcom,battery-type",
 							&battery_type);
 	if (!rc)
-		pr_info("%s loaded\n", battery_type);
+		pr_err("%s loaded\n", battery_type);
 	else
-		pr_info("%s loaded\n", best_node->name);
+		pr_err("%s loaded\n", best_node->name);
 
 	return of_batterydata_load_battery_data(best_node,
 					best_id_kohm, batt_data);

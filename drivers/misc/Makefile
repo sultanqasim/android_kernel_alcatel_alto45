@@ -30,7 +30,11 @@ obj-$(CONFIG_SGI_GRU)		+= sgi-gru/
 obj-$(CONFIG_CS5535_MFGPT)	+= cs5535-mfgpt.o
 obj-$(CONFIG_HP_ILO)		+= hpilo.o
 obj-$(CONFIG_APDS9802ALS)	+= apds9802als.o
+# [PLATFORM]-Mod-BEGIN by TCTNB.YJ, 2014/04/11, add sensor driver.
+ifndef CONFIG_TCT_8X16_COMMON
 obj-$(CONFIG_APDS9930)		+= apds993x.o
+endif
+# [PLATFORM]-Mod-END by TCTNB.YJ
 obj-$(CONFIG_ISL29003)		+= isl29003.o
 obj-$(CONFIG_ISL29020)		+= isl29020.o
 obj-$(CONFIG_USB_HSIC_SMSC_HUB) += smsc_hub.o
@@ -63,4 +67,13 @@ obj-$(CONFIG_QFP_FUSE) += qfp_fuse.o
 obj-$(CONFIG_TI_DRV2667) += ti_drv2667.o
 obj-$(CONFIG_QPNP_MISC) += qpnp-misc.o
 obj-$(CONFIG_APQ8084_DOCKING_STATION)	+= apq8084_dock.o
+# [FEATURE]-Add-BEGIN by TCTNB.XQJ, 2014/03/24, FR623145, Add NFC function,trnasplant from 8926
+obj-$(CONFIG_PN547_I2C) += pn547.o
+# [FEATURE]-Add-END by TCTNB.XQJ
 obj-y				+= qcom/
+
+# [PLATFORM]-Mod-BEGIN by TCTNB.YJ, 2014/04/11, add sensor driver.
+ifdef CONFIG_TCT_8X16_COMMON
+obj-$(CONFIG_TCT_8X16_COMMON)          += tct_sensor/
+endif
+# [PLATFORM]-Mod-END by TCTNB.YJ

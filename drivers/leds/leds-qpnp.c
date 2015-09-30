@@ -26,6 +26,7 @@
 #include <linux/delay.h>
 #include <linux/regulator/consumer.h>
 #include <linux/delay.h>
+#include <linux/power_supply.h>
 
 #define WLED_MOD_EN_REG(base, n)	(base + 0x60 + n*0x10)
 #define WLED_IDAC_DLY_REG(base, n)	(WLED_MOD_EN_REG(base, n) + 0x01)
@@ -87,6 +88,7 @@
 
 #define PMIC_VER_8026			0x04
 #define PMIC_VER_8941			0x01
+#define PMIC_VER_8916			0x0B
 #define PMIC_VERSION_REG		0x0105
 
 #define WLED_DEFAULT_STRINGS		0x01
@@ -413,6 +415,8 @@ struct mpp_config_data {
 	u8	mode_ctrl;
 	u8	vin_ctrl;
 	u8	min_brightness;
+	u8	prev_brightness;
+	u8	pmic_version;
 	u8 pwm_mode;
 	u32	max_uV;
 	u32	min_uV;
@@ -527,6 +531,7 @@ struct gpio_config_data {
  * @turn_off_delay_ms - number of msec before turning off the LED
  */
 struct qpnp_led_data {
+	struct power_supply	*bms_psy;
 	struct led_classdev	cdev;
 	struct spmi_device	*spmi_dev;
 	struct delayed_work	dwork;
@@ -548,6 +553,9 @@ struct qpnp_led_data {
 };
 
 static int num_kpbl_leds_on;
+/*[PLATFORM]-Add-BEGIN by Miao, FR-666872 , 2014/06/18*/
+extern bool alarm_boot; //defined in /kernel/main.c
+/*[PLATFORM]-Add-END*/
 
 static int
 qpnp_led_masked_write(struct qpnp_led_data *led, u16 addr, u8 mask, u8 val)
@@ -1011,6 +1019,23 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 		}
 
 		led->mpp_cfg->enable = false;
+	}
+
+	/*
+	 * If PM8916 - Notify the BMS driver of the change in the MPP
+	 * current sink configuration.
+	 */
+	if (led->mpp_cfg->pmic_version == PMIC_VER_8916) {
+		if (led->mpp_cfg->prev_brightness != led->cdev.brightness) {
+			led->mpp_cfg->prev_brightness = led->cdev.brightness;
+			if (!led->bms_psy)
+				led->bms_psy = power_supply_get_by_name("bms");
+			if (led->bms_psy)
+				power_supply_recalib_vbat(led->bms_psy,
+							!!led->cdev.brightness);
+			pr_debug("MPP->BMS set brightness=%d\n",
+						led->cdev.brightness);
+		}
 	}
 
 	if (led->mpp_cfg->pwm_mode != MANUAL_MODE)
@@ -3504,6 +3529,13 @@ static int qpnp_get_config_mpp(struct qpnp_led_data *led,
 		}
 	}
 
+	rc = spmi_ext_register_readl(led->spmi_dev->ctrl, led->spmi_dev->sid,
+			PMIC_VERSION_REG, &led->mpp_cfg->pmic_version, 1);
+	if (rc) {
+		dev_err(&led->spmi_dev->dev,
+			"Unable to read pmic ver, rc(%d)\n", rc);
+	}
+
 	if (led->mpp_cfg->mpp_reg) {
 		rc = of_property_read_u32(of_get_parent(node),
 					"qcom,mpp-power-max-voltage", &val);
@@ -3864,14 +3896,15 @@ static int qpnp_leds_probe(struct spmi_device *spmi)
 		}
 
 		/* configure default state */
-		if (led->default_on) {
+		if (led->default_on && !alarm_boot) {
 			led->cdev.brightness = led->cdev.max_brightness;
 			__qpnp_led_work(led, led->cdev.brightness);
 			if (led->turn_off_delay_ms > 0)
 				qpnp_led_turn_off(led);
-		} else
+		} else  {
 			led->cdev.brightness = LED_OFF;
-
+                        __qpnp_led_work(led, led->cdev.brightness); //[BUGFIX]Added by Miao, bug 578498
+                        }
 		parsed_leds++;
 	}
 	dev_set_drvdata(&spmi->dev, led_array);

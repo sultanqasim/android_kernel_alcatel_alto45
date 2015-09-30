@@ -368,6 +368,21 @@ config LEDS_BD2802
 	  This option enables support for BD2802GU RGB LED driver chips
 	  accessed via the I2C bus.
 
+config LEDS_BCT3253 #[BUGFIX]-Added by TCTNB.XQJ,FR-742098 2014/07/23,use external led ic
+	tristate "LED driver for BCT3253 RGB LED"
+	depends on LEDS_CLASS
+	depends on I2C
+	help
+	  This option enables support for BCT3253 GU RGB LED driver chips
+	  accessed via the I2C bus.
+
+config LEDS_SN31XX #[BUGFIX]-Added by TCTNB.XQJ,FR-803287 2014/10/08,use external led ic
+	tristate "LED driver for SN31XX RGB LED"
+	depends on LEDS_CLASS
+	depends on I2C
+	help
+	  This option enables support for SN319XX GU RGB LED driver chips
+	  accessed via the I2C bus.
 config LEDS_INTEL_SS4200
 	tristate "LED driver for Intel NAS SS4200 series"
 	depends on LEDS_CLASS
