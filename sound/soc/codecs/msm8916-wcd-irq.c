@@ -31,7 +31,13 @@
 #define MAX_NUM_IRQS 14
 #define NUM_IRQ_REGS 2
 
+/* [PLATFORM]-Mod-BEGIN by TCTNB.HJ, 2014/09/17*/
+#ifdef CONFIG_TCT_8X16_COMMON
+#define WCD9XXX_SYSTEM_RESUME_TIMEOUT_MS 600
+#else
 #define WCD9XXX_SYSTEM_RESUME_TIMEOUT_MS 300
+#endif
+/* [PLATFORM]-Mod-END by TCTNB.HJ, 2014/09/17*/
 
 #define BYTE_BIT_MASK(nr) (1UL << ((nr) % BITS_PER_BYTE))
 #define BIT_BYTE(nr) ((nr) / BITS_PER_BYTE)
@@ -98,14 +104,22 @@ struct wcd9xxx_spmi_map map;
 void wcd9xxx_spmi_enable_irq(int irq)
 {
 	pr_debug("%s: irqno =%d\n", __func__, irq);
-	if ((irq >= 0) && (irq <= 7))
+	if ((irq >= 0) && (irq <= 7)) {
+		snd_soc_update_bits(map.codec,
+				MSM8X16_WCD_A_DIGITAL_INT_EN_CLR,
+				(0x01 << irq), 0x00);
 		snd_soc_update_bits(map.codec,
 				MSM8X16_WCD_A_DIGITAL_INT_EN_SET,
 				(0x01 << irq), (0x01 << irq));
-	if ((irq > 7) && (irq <= 15))
+	}
+	if ((irq > 7) && (irq <= 15)) {
+		snd_soc_update_bits(map.codec,
+				MSM8X16_WCD_A_ANALOG_INT_EN_CLR,
+				(0x01 << (irq - 8)), 0x00);
 		snd_soc_update_bits(map.codec,
 				MSM8X16_WCD_A_ANALOG_INT_EN_SET,
 				(0x01 << (irq - 8)), (0x01 << (irq - 8)));
+	}
 
 	if (!(map.mask[BIT_BYTE(irq)] & (BYTE_BIT_MASK(irq))))
 		return;
@@ -119,14 +133,23 @@ void wcd9xxx_spmi_enable_irq(int irq)
 void wcd9xxx_spmi_disable_irq(int irq)
 {
 	pr_debug("%s: irqno =%d\n", __func__, irq);
-	if ((irq >= 0) && (irq <= 7))
+	if ((irq >= 0) && (irq <= 7)) {
 		snd_soc_update_bits(map.codec,
 				MSM8X16_WCD_A_DIGITAL_INT_EN_SET,
-				(0x01 << irq), 0x00);
-	if ((irq > 7) && (irq <= 15))
+				(0x01 << (irq)), 0x00);
+		snd_soc_update_bits(map.codec,
+				MSM8X16_WCD_A_DIGITAL_INT_EN_CLR,
+				(0x01 << irq), (0x01 << irq));
+	}
+
+	if ((irq > 7) && (irq <= 15)) {
 		snd_soc_update_bits(map.codec,
 				MSM8X16_WCD_A_ANALOG_INT_EN_SET,
 				(0x01 << (irq - 8)), 0x00);
+		snd_soc_update_bits(map.codec,
+				MSM8X16_WCD_A_ANALOG_INT_EN_CLR,
+				(0x01 << (irq - 8)), (0x01 << (irq - 8)));
+	}
 
 	if (map.mask[BIT_BYTE(irq)] & (BYTE_BIT_MASK(irq)))
 		return;
@@ -234,6 +257,7 @@ enum wcd9xxx_spmi_pm_state wcd9xxx_spmi_pm_cmpxchg(
 	old = map.pm_state;
 	if (old == o)
 		map.pm_state = n;
+	pr_debug("%s: map.pm_state = %d\n", __func__, map.pm_state);
 	mutex_unlock(&map.pm_lock);
 	return old;
 }
@@ -321,21 +345,18 @@ bool wcd9xxx_spmi_lock_sleep()
 	 * but btn0_lpress_fn is not wcd9xxx_spmi_irq_thread's subroutine and
 	 * It can race with wcd9xxx_spmi_irq_thread.
 	 * So need to embrace wlock_holders with mutex.
-	 *
-	 * If system didn't resume, we can simply return false so codec driver's
-	 * IRQ handler can return without handling IRQ.
-	 * As interrupt line is still active, codec will have another IRQ to
-	 * retry shortly.
 	 */
 	mutex_lock(&map.pm_lock);
 	if (map.wlock_holders++ == 0) {
 		pr_debug("%s: holding wake lock\n", __func__);
 		pm_qos_update_request(&map.pm_qos_req,
 				      msm_cpuidle_get_deep_idle_latency());
+		pm_stay_awake(&map.spmi[0]->dev);
 	}
 	mutex_unlock(&map.pm_lock);
 	pr_debug("%s: wake lock counter %d\n", __func__,
 			map.wlock_holders);
+	pr_debug("%s: map.pm_state = %d\n", __func__, map.pm_state);
 
 	if (!wait_event_timeout(map.pm_wq,
 				((wcd9xxx_spmi_pm_cmpxchg(
@@ -356,6 +377,7 @@ bool wcd9xxx_spmi_lock_sleep()
 		return false;
 	}
 	wake_up_all(&map.pm_wq);
+	pr_debug("%s: leaving pm_state = %d\n", __func__, map.pm_state);
 	return true;
 }
 EXPORT_SYMBOL(wcd9xxx_spmi_lock_sleep);
@@ -374,10 +396,12 @@ void wcd9xxx_spmi_unlock_sleep()
 			map.pm_state = WCD9XXX_PM_SLEEPABLE;
 		pm_qos_update_request(&map.pm_qos_req,
 				PM_QOS_DEFAULT_VALUE);
+		pm_relax(&map.spmi[0]->dev);
 	}
 	mutex_unlock(&map.pm_lock);
 	pr_debug("%s: wake lock counter %d\n", __func__,
 			map.wlock_holders);
+	pr_debug("%s: map.pm_state = %d\n", __func__, map.pm_state);
 	wake_up_all(&map.pm_wq);
 }
 EXPORT_SYMBOL(wcd9xxx_spmi_unlock_sleep);
@@ -405,7 +429,6 @@ int wcd9xxx_spmi_irq_init(void)
 	pm_qos_add_request(&map.pm_qos_req,
 				PM_QOS_CPU_DMA_LATENCY,
 				PM_QOS_DEFAULT_VALUE);
-
 	return 0;
 }
 

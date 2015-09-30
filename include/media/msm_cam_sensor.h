@@ -708,6 +708,11 @@ struct sensor_init_cfg_data {
 #define VIDIOC_MSM_SENSOR_INIT_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 10, struct sensor_init_cfg_data)
 
+/* [PLATFORM]-Add-BEGIN by TCTNB.qijiang.yu, 2014/05/06, OTP dev*/
+#define VIDIOC_MSM_SENSOR_GET_OTP_STATUS \
+        _IOWR('V', BASE_VIDIOC_PRIVATE + 11, uint32_t)
+/* [PLATFORM]-Add-END by TCTNB.qijiang.yu*/
+
 #define MSM_V4L2_PIX_FMT_META v4l2_fourcc('M', 'E', 'T', 'A') /* META */
 
 #endif /* __LINUX_MSM_CAM_SENSOR_H */

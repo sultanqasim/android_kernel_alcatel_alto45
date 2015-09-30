@@ -248,7 +248,7 @@ static const struct snd_soc_dapm_widget msm8x16_dapm_widgets[] = {
 static char const *rx_bit_format_text[] = {"S16_LE", "S24_LE"};
 static const char *const ter_mi2s_tx_ch_text[] = {"One", "Two"};
 static const char *const loopback_mclk_text[] = {"DISABLE", "ENABLE"};
-
+/* [PLATFORM]-Mod-END by TCTNB.HJ, 2014/05/26*/
 static int msm_pri_rx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 				struct snd_pcm_hw_params *params)
 {
@@ -593,28 +593,29 @@ static int msm8x16_enable_codec_ext_clk(struct snd_soc_codec *codec,
 		   atomic_read(&pdata->mclk_rsc_ref));
 	if (enable) {
 		if (atomic_inc_return(&pdata->mclk_rsc_ref) == 1) {
+			cancel_delayed_work_sync(
+					&pdata->disable_mclk_work);
 			mutex_lock(&pdata->cdc_mclk_mutex);
-			if (atomic_read(&pdata->dis_work_mclk) == true) {
-				cancel_delayed_work_sync(
-					&pdata->enable_mclk_work);
-			} else {
-				pdata->digital_cdc_clk.clk_val = pdata->mclk_freq;
+			if (atomic_read(&pdata->mclk_enabled) == false) {
+				pdata->digital_cdc_clk.clk_val =
+							pdata->mclk_freq;
 				afe_set_digital_codec_core_clock(
 						AFE_PORT_ID_PRIMARY_MI2S_RX,
 						&pdata->digital_cdc_clk);
-				atomic_set(&pdata->dis_work_mclk, true);
+				atomic_set(&pdata->mclk_enabled, true);
 			}
 			mutex_unlock(&pdata->cdc_mclk_mutex);
 		}
 	} else {
+		cancel_delayed_work_sync(&pdata->disable_mclk_work);
 		mutex_lock(&pdata->cdc_mclk_mutex);
-		atomic_set(&pdata->mclk_rsc_ref, 0);
-		cancel_delayed_work_sync(&pdata->enable_mclk_work);
-		pdata->digital_cdc_clk.clk_val = 0;
-		afe_set_digital_codec_core_clock(
-				AFE_PORT_ID_PRIMARY_MI2S_RX,
-				&pdata->digital_cdc_clk);
-		atomic_set(&pdata->dis_work_mclk, false);
+		if (atomic_read(&pdata->mclk_enabled) == true) {
+			pdata->digital_cdc_clk.clk_val = 0;
+			afe_set_digital_codec_core_clock(
+					AFE_PORT_ID_PRIMARY_MI2S_RX,
+					&pdata->digital_cdc_clk);
+			atomic_set(&pdata->mclk_enabled, false);
+		}
 		mutex_unlock(&pdata->cdc_mclk_mutex);
 	}
 	return ret;
@@ -1057,6 +1058,11 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	btn_low = btn_cfg->_v_btn_low;
 	btn_high = btn_cfg->_v_btn_high;
 
+/* [PLATFORM]-Mod-BEGIN by TCTNB.HJ, 2014/07/25 */
+#ifdef CONFIG_TCT_8X16_COMMON
+	btn_low[0] = 0;
+	btn_high[0] = 25;
+#else
 	btn_low[0] = 0;
 	btn_high[0] = 25;
 	btn_low[1] = 25;
@@ -1067,7 +1073,8 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	btn_high[3] = 112;
 	btn_low[4] = 112;
 	btn_high[4] = 137;
-
+#endif
+/* [PLATFORM]-Mod-BEGIN by TCTNB.HJ, 2014/07/25 */
 	return msm8x16_wcd_cal;
 }
 
@@ -1820,26 +1827,30 @@ static struct snd_soc_card bear_cards[MAX_SND_CARDS] = {
 	},
 };
 
-void enable_mclk(struct work_struct *work)
+void disable_mclk(struct work_struct *work)
 {
 	struct msm8916_asoc_mach_data *pdata = NULL;
 	struct delayed_work *dwork;
 	int ret = 0;
 
-	pr_debug("%s:\n", __func__);
 	dwork = to_delayed_work(work);
 	pdata = container_of(dwork, struct msm8916_asoc_mach_data,
-				enable_mclk_work);
+				disable_mclk_work);
 	mutex_lock(&pdata->cdc_mclk_mutex);
-	if (atomic_read(&pdata->dis_work_mclk) == true) {
-		pr_debug("clock enabled now disable\n");
+	pr_debug("%s: mclk_enabled %d mclk_rsc_ref %d\n", __func__,
+			atomic_read(&pdata->mclk_enabled),
+			atomic_read(&pdata->mclk_rsc_ref));
+
+	if (atomic_read(&pdata->mclk_enabled) == true
+		&& atomic_read(&pdata->mclk_rsc_ref) == 0) {
+		pr_debug("Disable the mclk\n");
 		pdata->digital_cdc_clk.clk_val = 0;
 		ret = afe_set_digital_codec_core_clock(
 				AFE_PORT_ID_PRIMARY_MI2S_RX,
 				&pdata->digital_cdc_clk);
 		if (ret < 0)
-			pr_err("failed to disable the MCLK\n");
-		atomic_set(&pdata->dis_work_mclk, false);
+			pr_err("%s failed to disable the MCLK\n", __func__);
+		atomic_set(&pdata->mclk_enabled, false);
 	}
 	mutex_unlock(&pdata->cdc_mclk_mutex);
 }
@@ -2161,7 +2172,10 @@ static int msm8x16_asoc_machine_probe(struct platform_device *pdev)
 	pdata->digital_cdc_clk.clk_val = pdata->mclk_freq;
 	pdata->digital_cdc_clk.clk_root = 5;
 	pdata->digital_cdc_clk.reserved = 0;
-
+/*[PLATFORM]-Add-BEGIN by TCTNB.HJ, 2014/07/16, loop support*/
+	/* Initialize loopback mode to false */
+	pdata->lb_mode = false;
+/*[PLATFORM]-Add-END by TCTNB.HJ, 2014/07/16, loop support*/
 	msm8x16_setup_hs_jack(pdev, pdata);
 
 	card->dev = &pdev->dev;
@@ -2171,10 +2185,10 @@ static int msm8x16_asoc_machine_probe(struct platform_device *pdev)
 	if (ret)
 		goto err;
 	/* initialize timer */
-	INIT_DELAYED_WORK(&pdata->enable_mclk_work, enable_mclk);
+	INIT_DELAYED_WORK(&pdata->disable_mclk_work, disable_mclk);
 	mutex_init(&pdata->cdc_mclk_mutex);
 	atomic_set(&pdata->mclk_rsc_ref, 0);
-	atomic_set(&pdata->dis_work_mclk, false);
+	atomic_set(&pdata->mclk_enabled, false);
 
 	ret = snd_soc_of_parse_audio_routing(card,
 			"qcom,audio-routing");
