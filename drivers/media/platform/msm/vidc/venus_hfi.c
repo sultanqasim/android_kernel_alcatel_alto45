@@ -818,18 +818,7 @@ static int venus_hfi_vote_buses(void *dev, struct vidc_bus_vote_data *data,
 			continue;
 		}
 
-		/* Annoying little hack here: if the bus vector is 0, it
-		 * actually means "unvote".  However if the client is calling
-		 * vote_bus, it's probably not very nice to unvote the buses.
-		 * So just ignore the vote instead. If client wants to unvote,
-		 * it'll call venus_hfi_unvote_buses */
 		bus_vector = venus_hfi_get_bus_vector(device, bus, load);
-		if (!bus_vector) {
-			dprintk(VIDC_DBG, "Skipping voting for %s (no load)\n",
-					bus->pdata->name);
-			continue;
-		}
-
 		rc = msm_bus_scale_client_update_request(bus->priv, bus_vector);
 		if (rc) {
 			dprintk(VIDC_ERR, "Failed voting for bus %s @ %d: %d\n",
@@ -1437,6 +1426,24 @@ static int venus_hfi_power_enable(void *dev)
 
 static void venus_hfi_pm_hndlr(struct work_struct *work);
 static DECLARE_DELAYED_WORK(venus_hfi_pm_work, venus_hfi_pm_hndlr);
+
+static int venus_hfi_suspend(void *dev)
+{
+	int rc = 0;
+	struct venus_hfi_device *device = (struct venus_hfi_device *) dev;
+
+	if (!device) {
+		dprintk(VIDC_ERR, "%s invalid device\n", __func__);
+		return -EINVAL;
+	}
+	dprintk(VIDC_INFO, "%s\n", __func__);
+
+	if (device->power_enabled) {
+		rc = flush_delayed_work(&venus_hfi_pm_work);
+		dprintk(VIDC_INFO, "%s flush delayed work %d\n", __func__, rc);
+	}
+	return 0;
+}
 
 static inline int venus_hfi_clk_gating_off(struct venus_hfi_device *device)
 {
@@ -4121,6 +4128,7 @@ static void venus_init_hfi_callbacks(struct hfi_device *hdev)
 	hdev->capability_check = venus_hfi_capability_check;
 	hdev->get_core_capabilities = venus_hfi_get_core_capabilities;
 	hdev->power_enable = venus_hfi_power_enable;
+	hdev->suspend = venus_hfi_suspend;
 }
 
 int venus_hfi_initialize(struct hfi_device *hdev, u32 device_id,
