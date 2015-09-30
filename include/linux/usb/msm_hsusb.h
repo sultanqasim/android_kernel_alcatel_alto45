@@ -101,8 +101,13 @@ enum msm_usb_phy_type {
 	CI_45NM_INTEGRATED_PHY,
 	SNPS_28NM_INTEGRATED_PHY,
 };
-
+/* [PLATFORM]-Add-BEGIN by TCTNB.FLF, PR-745070, 2014/07/24, change ibus max to 1.2A according to HW */
+#ifdef CONFIG_TCT_8X16_ALTO45
+#define IDEV_CHG_MAX	1200
+#else
 #define IDEV_CHG_MAX	1500
+#endif
+/* [PLATFORM]-Add-END by TCTNB.FLF */
 #define IDEV_CHG_MIN	500
 #define IUNIT		100
 
@@ -270,6 +275,7 @@ struct msm_otg_platform_data {
 	bool enable_lpm_on_dev_suspend;
 	bool core_clk_always_on_workaround;
 	bool delay_lpm_on_disconnect;
+	bool delay_lpm_hndshk_on_disconnect;
 	bool dp_manual_pullup;
 	bool enable_sec_phy;
 	struct msm_bus_scale_pdata *bus_scale_table;
@@ -500,6 +506,11 @@ struct msm_otg {
 	int ui_enabled;
 	bool pm_done;
 	struct qpnp_vadc_chip	*vadc_dev;
+/* [PLATFORM]-Mod-BEGIN by TCTNB.FLF, PR-776301, 2014/09/01,  float charge detect */
+#ifdef CONFIG_TCT_8X16_ALTO45
+	struct delayed_work carkit_detect;
+#endif
+/* [PLATFORM]-Mod-END by TCTNB.FLF */
 	int ext_id_irq;
 };
 

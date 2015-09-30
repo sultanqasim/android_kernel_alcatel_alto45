@@ -257,7 +257,7 @@ static struct usb_device_descriptor device_desc = {
 	.bDeviceClass         = USB_CLASS_PER_INTERFACE,
 	.idVendor             = __constant_cpu_to_le16(VENDOR_ID),
 	.idProduct            = __constant_cpu_to_le16(PRODUCT_ID),
-	.bcdDevice            = __constant_cpu_to_le16(0xffff),
+	.bcdDevice            = __constant_cpu_to_le16(0x0225),//[BUGFIX]-Mod by TCTNB.Xiaoman.Wang,05/28/2014,675779,Change bcdDevice from 0xffff to 0x0225
 	.bNumConfigurations   = 1,
 };
 
@@ -536,24 +536,29 @@ static int functionfs_ready_callback(struct ffs_data *ffs)
 	struct functionfs_config *config = ffs_function.config;
 	int ret = 0;
 
-	if (dev) {
-		ret = functionfs_bind(ffs, dev->cdev);
-		if (ret)
-			return ret;
-	}
-
 	/* dev is null in case ADB is not in the composition */
-	if (dev)
+	if (dev) {
 		mutex_lock(&dev->mutex);
+		ret = functionfs_bind(ffs, dev->cdev);
+		if (ret) {
+			mutex_unlock(&dev->mutex);
+			return ret;
+		}
+	} else {
+		/* android ffs_func requires daemon to start only after enable*/
+		pr_debug("start adbd only in ADB composition\n");
+		return -ENODEV;
+	}
 
 	config->data = ffs;
 	config->opened = true;
+	/* Save dev in case the adb function will get disabled */
+	config->dev = dev;
 
-	if (config->enabled && dev)
+	if (config->enabled)
 		android_enable(dev);
 
-	if (dev)
-		mutex_unlock(&dev->mutex);
+	mutex_unlock(&dev->mutex);
 
 	return 0;
 }
@@ -563,30 +568,32 @@ static void functionfs_closed_callback(struct ffs_data *ffs)
 	struct android_dev *dev = ffs_function.android_dev;
 	struct functionfs_config *config = ffs_function.config;
 
-	/* In case new composition is without ADB, use saved one */
+	/*
+	 * In case new composition is without ADB or ADB got disabled by the
+	 * time ffs_daemon was stopped then use saved one
+	 */
 	if (!dev)
 		dev = config->dev;
 
+	/* fatal-error: It should never happen */
 	if (!dev)
 		pr_err("adb_closed_callback: config->dev is NULL");
 
 	if (dev)
 		mutex_lock(&dev->mutex);
 
-	config->opened = false;
-
 	if (config->enabled && dev)
 		android_disable(dev);
 
 	config->dev = NULL;
 
-	if (dev)
-		mutex_unlock(&dev->mutex);
-
 	config->opened = false;
 	config->data = NULL;
 
 	functionfs_unbind(ffs);
+
+	if (dev)
+		mutex_unlock(&dev->mutex);
 }
 
 static void *functionfs_acquire_dev_callback(const char *dev_name)
@@ -2217,6 +2224,12 @@ static int mass_storage_function_init(struct android_usb_function *f,
 		config->fsg.luns[config->fsg.nluns].removable = 0;
 		snprintf(name[config->fsg.nluns], MAX_LUN_NAME, "rom");
 		config->fsg.nluns++;
+		//[BUGFIX]-Add-BEGIN by TCTNB.Xiaoman.Wang,03/25/2014,645050,USB autoinstall
+		#if defined(CONFIG_JRD_CD_ROM_EMUM_EJECT) && !defined (FEATURE_TCTNB_MMITEST)
+		is_cd_rom_inited = TRUE;
+		printk("lun0\n");
+		#endif
+		//[BUGFIX]-Add-END by TCTNB.Xiaoman.Wang
 	}
 
 	if (uicc_nluns > FSG_MAX_LUNS - config->fsg.nluns) {
@@ -2898,8 +2911,50 @@ functions_store(struct device *pdev, struct device_attribute *attr,
 		}
 		INIT_LIST_HEAD(&conf->enabled_functions);
 	}
+//[BUGFIX]-Add-BEGIN by TCTNB.Xiaoman.Wang,03/25/2014,645050,USB driver autoinstall,
+#if defined(CONFIG_JRD_CD_ROM_EMUM_EJECT) && !defined (FEATURE_TCTNB_MMITEST)
+	strlcpy(function_buff, buff, sizeof(function_buff));
 
+	printk("is_power_off_charging:%d\n",is_power_off_charging);
+
+	//if(!remove_cd_rom_flag && is_cd_rom_inited)
+	if(!remove_cd_rom_flag && !is_power_off_charging && is_cd_rom_inited)
+	{
+		if(strstr(buff,"rndis"))
+		{
+			int value;
+			sscanf(idProduct_buff, "%04x\n", &value);
+			device_desc.idProduct = value;
+			strlcpy(buf, buff, sizeof(buf));
+		}
+               //[BUGFIX]-Add-BEGIN by TCTNB.Xiaoman.Wang,04/17/2014,653319, USB Accessory Test case fail
+		else if(strstr(buff,"accessory")) //CTS Accessory Test in Ubuntu
+		{
+			int value;
+			sscanf(idProduct_buff, "%04x\n", &value);
+			device_desc.idProduct = value;
+			strlcpy(buf, buff, sizeof(buf));
+		}
+               //[BUGFIX]-Add-END by TCTNB.Xiaoman.Wang
+	        else if(strstr(buff,"adb"))
+		{
+			strlcpy(buf, MASS_STORAGE_ADB_FUNCTION_STRING, sizeof(buf));
+		}
+		else
+		{
+			strlcpy(buf, MASS_STORAGE_ONLY_FUNCTION_STRING, sizeof(buf));
+		}
+	}
+	else
+	{
+		strlcpy(buf, buff, sizeof(buf));
+	}
+	printk("buff: %s\n",buff);
+	printk("buf: %s\n",buf);
+#else
 	strlcpy(buf, buff, sizeof(buf));
+#endif
+//[BUGFIX]-Add-END by TCTNB.Xiaoman.Wang
 	b = strim(buf);
 
 	while (b) {
@@ -3031,6 +3086,14 @@ static ssize_t enable_store(struct device *pdev, struct device_attribute *attr,
 					f_holder->f->disable(f_holder->f);
 			}
 		dev->enabled = false;
+        //[BUGFIX]-Add-BEGIN by TCTNB.Xiaoman.Wang,03/25/2014,645050,USB driver autoinstall,
+		#if defined(CONFIG_JRD_CD_ROM_EMUM_EJECT) && !defined (FEATURE_TCTNB_MMITEST)
+		if(is_power_off_charging)
+			is_power_off_charging = FALSE;
+
+		printk("is_power_off_charging:%d\n",is_power_off_charging);
+		#endif
+        //[BUGFIX]-Add-END by TCTNB.Xiaoman.Wang
 	} else if (__ratelimit(&rl)) {
 		pr_err("android_usb: already %s\n",
 				dev->enabled ? "enabled" : "disabled");
@@ -3081,6 +3144,39 @@ out:
 	return snprintf(buf, PAGE_SIZE, "%s\n", state);
 }
 
+//[BUGFIX]-Add-BEGIN by TCTNB.Xiaoman.Wang,03/25/2014,645050,USB driver autoinstall,
+#if defined(CONFIG_JRD_CD_ROM_EMUM_EJECT) && !defined (FEATURE_TCTNB_MMITEST)
+#define DESCRIPTOR_ATTR_PRODUCT_ID(field, format_string)				\
+static ssize_t								\
+field ## _show(struct device *dev, struct device_attribute *attr,	\
+		char *buf)						\
+{									\
+	return snprintf(buf, PAGE_SIZE,					\
+			format_string, device_desc.field);		\
+}									\
+static ssize_t								\
+field ## _store(struct device *dev, struct device_attribute *attr,	\
+		const char *buf, size_t size)				\
+{									\
+	int value;							\
+	strlcpy(idProduct_buff, buf, sizeof(idProduct_buff));		\
+    if(!remove_cd_rom_flag && !is_power_off_charging && is_cd_rom_inited)				\
+	{									\
+		if (sscanf(MASS_STORAGE_ONLY_PID, format_string, &value) == 1) {			\
+			device_desc.field = value;				\
+			return size;						\
+		}\
+		return -1;\
+	}									\
+	if (sscanf(buf, format_string, &value) == 1) {			\
+		device_desc.field = value;				\
+		return size;						\
+	}								\
+	return -1;							\
+}									\
+static DEVICE_ATTR(field, S_IRUGO | S_IWUSR, field ## _show, field ## _store);
+#endif
+//[BUGFIX]-Add-END by TCTNB.Xiaoman.Wang
 #define DESCRIPTOR_ATTR(field, format_string)				\
 static ssize_t								\
 field ## _show(struct device *dev, struct device_attribute *attr,	\
@@ -3123,7 +3219,13 @@ static DEVICE_ATTR(field, S_IRUGO | S_IWUSR, field ## _show, field ## _store);
 
 
 DESCRIPTOR_ATTR(idVendor, "%04x\n")
+//[BUGFIX]-Add-BEGIN by TCTNB.Xiaoman.Wang,03/25/2014,645050,USB driver autoinstall,
+#if defined(CONFIG_JRD_CD_ROM_EMUM_EJECT) && !defined (FEATURE_TCTNB_MMITEST)
+DESCRIPTOR_ATTR_PRODUCT_ID(idProduct, "%04x\n")
+#else
 DESCRIPTOR_ATTR(idProduct, "%04x\n")
+#endif
+//[BUGFIX]-Add-END by TCTNB.Xiaoman.Wang
 DESCRIPTOR_ATTR(bcdDevice, "%04x\n")
 DESCRIPTOR_ATTR(bDeviceClass, "%d\n")
 DESCRIPTOR_ATTR(bDeviceSubClass, "%d\n")
@@ -3276,6 +3378,7 @@ android_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *c)
 	int value = -EOPNOTSUPP;
 	unsigned long flags;
 	bool do_work = false;
+	bool prev_configured = false;
 
 	req->zero = 0;
 	req->length = 0;
@@ -3294,6 +3397,12 @@ android_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *c)
 			}
 		}
 
+	/*
+	 * skip the  work when 2nd set config arrives
+	 * with same value from the host.
+	 */
+	if (cdev->config)
+		prev_configured = true;
 	/* Special case the accessory function.
 	 * It needs to handle control requests before it is enabled.
 	 */
@@ -3309,7 +3418,8 @@ android_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *c)
 		do_work = true;
 	} else if (c->bRequest == USB_REQ_SET_CONFIGURATION &&
 						cdev->config) {
-		do_work = true;
+		if (!prev_configured)
+			do_work = true;
 	}
 	spin_unlock_irqrestore(&cdev->lock, flags);
 	if (do_work)

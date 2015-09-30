@@ -52,6 +52,12 @@
 
 #include <linux/msm-bus.h>
 
+//[PLATFORM]Add Begin by TCTSZ-pingao.yang 2014/7/15, refer to case 721583.
+#ifdef CONFIG_TCT_8X16_ALTO45
+#include <linux/wakelock.h>
+static struct wake_lock notify_usb_wake_lock;
+#endif
+//[PLATFORM]Add End by TCTSZ-pingao.yang
 #define MSM_USB_BASE	(motg->regs)
 #define DRIVER_NAME	"msm_otg"
 
@@ -903,15 +909,9 @@ phcd_retry:
 	if (atomic_read(&motg->in_lpm))
 		return 0;
 
-	/*
-	 * Don't allow low power mode if bam pipes are still connected.
-	 * Otherwise it could lead to unclocked access when sps driver
-	 * accesses USB bam registers as part of disconnecting bam pipes.
-	 */
-	if (!msm_bam_usb_lpm_ok(CI_CTRL)) {
-		pm_schedule_suspend(phy->dev, 1000);
+	if (motg->pdata->delay_lpm_hndshk_on_disconnect &&
+			!msm_bam_usb_lpm_ok(CI_CTRL))
 		return -EBUSY;
-	}
 
 	motg->ui_enabled = 0;
 	disable_irq(motg->irq);
@@ -1186,7 +1186,8 @@ static int msm_otg_resume(struct msm_otg *motg)
 	if (!atomic_read(&motg->in_lpm))
 		return 0;
 
-	msm_bam_notify_lpm_resume(CI_CTRL);
+	if (motg->pdata->delay_lpm_hndshk_on_disconnect)
+		msm_bam_notify_lpm_resume(CI_CTRL);
 
 	if (motg->ui_enabled) {
 		motg->ui_enabled = 0;
@@ -1466,7 +1467,6 @@ static void msm_otg_set_online_status(struct msm_otg *motg)
 	if (power_supply_set_online(psy, false))
 		dev_dbg(motg->phy.dev, "error setting power supply property\n");
 }
-
 static void msm_otg_notify_charger(struct msm_otg *motg, unsigned mA)
 {
 	struct usb_gadget *g = motg->phy.otg->gadget;
@@ -1506,6 +1506,12 @@ static void msm_otg_notify_charger(struct msm_otg *motg, unsigned mA)
 		pm8921_charger_vbus_draw(mA);
 
 	motg->cur_power = mA;
+
+//[PLATFORM]Add Begin by TCTSZ-pingao.yang 2014/7/15, refer to case 721583.
+#ifdef CONFIG_TCT_8X16_ALTO45
+	wake_lock_timeout(&notify_usb_wake_lock, 1 * HZ);
+#endif
+//[PLATFORM]Add End by TCTSZ-pingao.yang
 }
 
 static int msm_otg_set_power(struct usb_phy *phy, unsigned mA)
@@ -2417,6 +2423,17 @@ static const char *chg_to_string(enum usb_chg_type chg_type)
 	}
 }
 
+/* [PLATFORM]-Mod-BEGIN by TCTNB.FLF, PR-776301, 2014/09/01,  float charge detect */
+#ifdef CONFIG_TCT_8X16_ALTO45
+static void carkit_detect_work(struct work_struct *w)
+{
+    struct msm_otg *motg = container_of(w, struct msm_otg, carkit_detect.work);
+    pr_debug("msm_otg: detect a carkit charger.\n");
+    msm_otg_notify_charger(motg, 500);
+}
+#endif
+/* [PLATFORM]-Mod-END by TCTNB.FLF */
+
 #define MSM_CHG_DCD_TIMEOUT		(750 * HZ/1000) /* 750 msec */
 #define MSM_CHG_DCD_POLL_TIME		(50 * HZ/1000) /* 50 msec */
 #define MSM_CHG_PRIMARY_DET_TIME	(50 * HZ/1000) /* TVDPSRC_ON */
@@ -2471,10 +2488,12 @@ static void msm_chg_detect_work(struct work_struct *w)
 		motg->dcd_time += MSM_CHG_DCD_POLL_TIME;
 		tmout = motg->dcd_time >= MSM_CHG_DCD_TIMEOUT;
 		if (is_dcd || tmout) {
-			if (is_dcd)
+			if (is_dcd) {
 				dcd = true;
-			else
+			}
+			else {
 				dcd = false;
+			}
 			msm_chg_disable_dcd(motg);
 			msm_chg_enable_primary_det(motg);
 			delay = MSM_CHG_PRIMARY_DET_TIME;
@@ -2794,6 +2813,11 @@ static void msm_otg_sm_work(struct work_struct *w)
 						OTG_STATE_B_PERIPHERAL;
 					mod_timer(&motg->chg_check_timer,
 							CHG_RECHECK_DELAY);
+/* [PLATFORM]-Mod-BEGIN by TCTNB.FLF, PR-776301, 2014/09/01,  float charge detect */
+#ifdef CONFIG_TCT_8X16_ALTO45
+					schedule_delayed_work(&motg->carkit_detect,msecs_to_jiffies(2500));
+#endif
+/* [PLATFORM]-Mod-END by TCTNB.FLF */
 					break;
 				default:
 					break;
@@ -3504,11 +3528,17 @@ static void msm_otg_set_vbus_state(int online)
 
 	if (!init) {
 		init = true;
+		if (pmic_vbus_init.done &&
+				test_bit(B_SESS_VLD, &motg->inputs)) {
+			pr_debug("PMIC: BSV came late\n");
+			goto out;
+		}
 		complete(&pmic_vbus_init);
 		pr_debug("PMIC: BSV init complete\n");
 		return;
 	}
 
+out:
 	if (test_bit(MHL, &motg->inputs) ||
 			mhl_det_in_progress) {
 		pr_debug("PMIC: BSV interrupt ignored in MHL\n");
@@ -4439,6 +4469,8 @@ struct msm_otg_platform_data *msm_otg_dt_to_pdata(struct platform_device *pdev)
 				"qcom,hsusb-otg-clk-always-on-workaround");
 	pdata->delay_lpm_on_disconnect = of_property_read_bool(node,
 				"qcom,hsusb-otg-delay-lpm");
+	pdata->delay_lpm_hndshk_on_disconnect = of_property_read_bool(node,
+				"qcom,hsusb-otg-delay-lpm-hndshk-on-disconnect");
 	pdata->dp_manual_pullup = of_property_read_bool(node,
 				"qcom,dp-manual-pullup");
 	pdata->enable_sec_phy = of_property_read_bool(node,
@@ -4484,6 +4516,11 @@ static int msm_otg_probe(struct platform_device *pdev)
 	struct resource *res;
 	struct msm_otg *motg;
 	struct usb_phy *phy;
+//[BUGFIX]Add Begin by TCTSZ-Leo.guo 2014-5-7,ID-670150. USB ID pull-up enable.
+#if (defined CONFIG_TCT_8X16_POP8LTE)
+	struct pinctrl_state *set_state;
+#endif
+//[BUGFIX]Add End by TCTSZ-Leo.guo
 	struct msm_otg_platform_data *pdata;
 	void __iomem *tcsr;
 	int id_irq = 0;
@@ -4497,6 +4534,11 @@ static int msm_otg_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+//[PLATFORM]Add Begin by TCTSZ-pingao.yang 2014/7/15, refer to case 721583.
+#ifdef CONFIG_TCT_8X16_ALTO45
+	wake_lock_init(&notify_usb_wake_lock, WAKE_LOCK_SUSPEND, "notify_usb");
+#endif
+//[PLATFORM]Add End by TCTSZ-pingao.yang
 	/*
 	 * USB Core is running its protocol engine based on CORE CLK,
 	 * CORE CLK  must be running at >55Mhz for correct HSUSB
@@ -4799,6 +4841,11 @@ static int msm_otg_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&motg->chg_work, msm_chg_detect_work);
 	INIT_DELAYED_WORK(&motg->id_status_work, msm_id_status_w);
 	INIT_DELAYED_WORK(&motg->suspend_work, msm_otg_suspend_work);
+/* [PLATFORM]-Mod-BEGIN by TCTNB.FLF, PR-776301, 2014/09/01,  float charge detect */
+#ifdef CONFIG_TCT_8X16_ALTO45
+	INIT_DELAYED_WORK(&motg->carkit_detect, carkit_detect_work);
+#endif
+/* [PLATFORM]-Mod-END by TCTNB.FLF */
 	setup_timer(&motg->id_timer, msm_otg_id_timer_func,
 				(unsigned long) motg);
 	setup_timer(&motg->chg_check_timer, msm_otg_chg_check_timer_func,
@@ -4855,6 +4902,21 @@ static int msm_otg_probe(struct platform_device *pdev)
 		motg->pdata->otg_control == OTG_PMIC_CONTROL) {
 
 		if (gpio_is_valid(motg->pdata->usb_id_gpio)) {
+//[BUGFIX]Add Begin by TCTSZ-Leo.guo 2014-5-7,ID-670150. USB ID pull-up enable.
+#if (defined CONFIG_TCT_8X16_POP8LTE)
+			if (motg->phy_pinctrl) {
+				set_state =
+					pinctrl_lookup_state(motg->phy_pinctrl,
+							"usb_id_default");
+				if (IS_ERR(set_state)) {
+					pr_err("cannot get phy pinctrl active state\n");
+					goto remove_phy;
+				}
+				pinctrl_select_state(motg->phy_pinctrl,
+						set_state);
+			}
+#endif
+//[BUGFIX]Add End by TCTSZ-Leo.guo
 			/* usb_id_gpio request */
 			ret = gpio_request(motg->pdata->usb_id_gpio,
 							"USB_ID_GPIO");
@@ -5045,6 +5107,11 @@ static int msm_otg_remove(struct platform_device *pdev)
 	if (phy->otg->host || phy->otg->gadget)
 		return -EBUSY;
 
+//[PLATFORM]Add Begin by TCTSZ-pingao.yang 2014/7/15, refer to case 721583.
+#ifdef CONFIG_TCT_8X16_ALTO45
+	wake_lock_destroy(&notify_usb_wake_lock);
+#endif
+//[PLATFORM]Add End by TCTSZ-pingao.yang
 	unregister_pm_notifier(&motg->pm_notify);
 
 	if (!motg->ext_chg_device) {
@@ -5065,6 +5132,11 @@ static int msm_otg_remove(struct platform_device *pdev)
 	cancel_delayed_work_sync(&motg->chg_work);
 	cancel_delayed_work_sync(&motg->id_status_work);
 	cancel_delayed_work_sync(&motg->suspend_work);
+/* [PLATFORM]-Mod-BEGIN by TCTNB.FLF, PR-776301, 2014/09/01,  float charge detect */
+#ifdef CONFIG_TCT_8X16_ALTO45
+	cancel_delayed_work_sync(&motg->carkit_detect);
+#endif
+/* [PLATFORM]-Mod-END by TCTNB.FLF */
 	cancel_work_sync(&motg->sm_work);
 
 	pm_runtime_resume(&pdev->dev);

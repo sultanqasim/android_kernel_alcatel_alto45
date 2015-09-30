@@ -1119,4 +1119,16 @@ config RMNET_SDIO_SMD_DATA_CHANNEL
        help
 	  Data SMD channel for transferring network data
 
+#[BUGFIX]-Add-BEGIN by TCTNB.Xiaoman.Wang,03/25/2014,645050,USB driver autoinstall
+config JRD_CD_ROM_EMUM_EJECT
+       tristate "Enable USB driver autoinstall"
+       help
+	  Control USB autoinstall
+
+config USB_DRIVER_TCL
+       tristate "TCL USB driver"
+       help
+	  Control USB Driver type(TCL,ALCATEL)
+#[BUGFIX]-Add-END by TCTNB.Xiaoman.Wang
+
 endif # USB_GADGET
