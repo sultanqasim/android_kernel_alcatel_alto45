@@ -810,17 +810,16 @@ int msm_camera_init_gpio_pin_tbl(struct device_node *of_node,
 		gconf->gpio_num_info->valid[SENSOR_GPIO_STANDBY] = 1;
 		CDBG("%s qcom,gpio-standby %d\n", __func__,
 			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_STANDBY]);
-	} else
-		rc = 0;
-
-	rc = of_property_read_u32(of_node, "qcom,gpio-af-pwdm", &val);
-	if (rc != -EINVAL) {
+	}
+	/*[PLATFORM]-Modify-BEGIN by TCTNB.qijiang.yu, 2014/05/05, modify for camera AF*/
+	if (of_property_read_bool(of_node, "qcom,gpio-af_pwdm") == true) {
+		rc = of_property_read_u32(of_node, "qcom,gpio-af_pwdm", &val);
 		if (rc < 0) {
-			pr_err("%s:%d read qcom,gpio-af-pwdm failed rc %d\n",
+			pr_err("%s:%d read qcom,gpio-af_pwdm failed rc %d\n",
 				__func__, __LINE__, rc);
 			goto ERROR;
 		} else if (val >= gpio_array_size) {
-			pr_err("%s:%d qcom,gpio-af-pwdm invalid %d\n",
+			pr_err("%s:%d qcom,gpio-af_pwdm invalid %d\n",
 				__func__, __LINE__, val);
 			rc = -EINVAL;
 			goto ERROR;
@@ -828,10 +827,10 @@ int msm_camera_init_gpio_pin_tbl(struct device_node *of_node,
 		gconf->gpio_num_info->gpio_num[SENSOR_GPIO_AF_PWDM] =
 			gpio_array[val];
 		gconf->gpio_num_info->valid[SENSOR_GPIO_AF_PWDM] = 1;
-		CDBG("%s qcom,gpio-af-pwdm %d\n", __func__,
+		CDBG("%s qcom,gpio-af_pwdm %d\n", __func__,
 			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_AF_PWDM]);
-	} else
-		rc = 0;
+	}
+/*[PLATFORM]-Modify-END by TCTNB.qijiang.yu, 2014/05/05*/
 
 	rc = of_property_read_u32(of_node, "qcom,gpio-flash-en", &val);
 	if (rc != -EINVAL) {

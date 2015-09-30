@@ -111,6 +111,21 @@ config MSM_ISPIF_V1
           of any CID of MSM_CSI22_HEADER can be routed to of pixel
           or raw data interface in VFE.
 
+# [PLATFORM]-Add-BEGIN by TCTNB.HJ, 2014/04/23, CAM dev
+config S5K5E2_ALTO45_TCT
+	bool "Sensor 5K5E2_ALTO45_TCT (BAYER 5M)"
+	depends on MSMB_CAMERA
+	---help---
+		OmniVision 5 MP Bayer Sensor, 2 mipi lane,
+		This sensor driver can support auto focus.
+
+config GC0339_ALTO45_TCT
+	bool "Sensor GC0339_ALTO45_TCT (BAYER .3M)"
+	depends on MSMB_CAMERA
+	---help---
+		gc0339 is a Galaxycore .3 MP Bayer Sensor.
+# [PLATFORM]-Add-END by TCTNB.HJ, 2014/04/23, CAM dev
+
 config IMX134
 	bool "Sensor IMX134 (BAYER 8M)"
 	depends on MSMB_CAMERA
@@ -190,7 +205,15 @@ config GC0339
 		It supports 1 or 2 mipi lanes.
 		Preview and snapshot resolution shall be 640*480 at 30 fps,
 		It does not support auto focus.
-
+# [PLATFORM]-Add-BEGIN by TCTSZ.luzhi, 2014/05/6, CAM dev
+config HI258_POP8S
+        bool "Sensor HI258 (YUV 2M)"
+        depends on MSMB_CAMERA
+        ---help---
+                hi258 is a 2MP YUV Sensor.
+                It supports 1 or 2 mipi lanes.
+                It does not support auto focus.
+# [PLATFORM]-Add-END by TCTSZ.luzhi, 2014/05/6, CAM dev
 config OV8825
 	bool "OmniVision OV8825 (BAYER 8MP)"
 	depends on MSMB_CAMERA

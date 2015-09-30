@@ -31,7 +31,8 @@
 
 /* Static declaration */
 static struct msm_sensor_ctrl_t *g_sctrl[MAX_CAMERAS];
-
+extern int actuator_exist;
+static int file_is_create = 0;
 static int msm_sensor_platform_remove(struct platform_device *pdev)
 {
 	struct msm_sensor_ctrl_t  *s_ctrl;
@@ -242,23 +243,27 @@ static int32_t msm_sensor_fill_actuator_subdevid_by_name(
 
 	if (0 == actuator_name_len)
 		return 0;
-
-	src_node = of_parse_phandle(of_node, "qcom,actuator-src", 0);
-	if (!src_node) {
-		CDBG("%s:%d src_node NULL\n", __func__, __LINE__);
-	} else {
-		rc = of_property_read_u32(src_node, "cell-index", &val);
-		CDBG("%s qcom,actuator cell index %d, rc %d\n", __func__,
-			val, rc);
-		if (rc < 0) {
-			pr_err("%s failed %d\n", __func__, __LINE__);
-			return -EINVAL;
+	/*if actuator exist, add subdev of actuator.
+	Modify-BEGIN by TCTNB.YQJ,07/14/2014,FR-695481 */
+	if(actuator_exist){
+		src_node = of_parse_phandle(of_node, "qcom,actuator-src", 0);
+		if (!src_node) {
+			CDBG("%s:%d src_node NULL\n", __func__, __LINE__);
+		} else {
+			rc = of_property_read_u32(src_node, "cell-index", &val);
+			CDBG("%s qcom,actuator cell index %d, rc %d\n", __func__,
+				val, rc);
+			if (rc < 0) {
+				pr_err("%s failed %d\n", __func__, __LINE__);
+				return -EINVAL;
+			}
+			*actuator_subdev_id = val;
+			of_node_put(src_node);
+			src_node = NULL;
 		}
-		*actuator_subdev_id = val;
-		of_node_put(src_node);
-		src_node = NULL;
 	}
-
+	CDBG("%s qcom,actuator cell index %d, rc %d\n", __func__,
+			val, rc);
 	return rc;
 }
 
@@ -314,6 +319,22 @@ static int32_t msm_sensor_validate_slave_info(
 	return 0;
 }
 
+static char vcm_type[8];
+static ssize_t vcm_type_read(struct class *class,
+				struct class_attribute *attr, char *buf)
+{
+	//int err;
+	if(actuator_exist)
+	 strcpy(vcm_type,"AF");
+	else
+	 strcpy(vcm_type,"FF");
+	return sprintf(buf, "%s\n", vcm_type);
+}
+
+static struct class_attribute vcm_type_value =
+	__ATTR(value, 0664, vcm_type_read, NULL);
+
+static struct class *vcm_type_class;
 /* static function definition */
 int32_t msm_sensor_driver_probe(void *setting)
 {
@@ -326,7 +347,7 @@ int32_t msm_sensor_driver_probe(void *setting)
 	struct msm_sensor_power_setting     *power_down_setting = NULL;
 	struct msm_camera_slave_info        *camera_info = NULL;
 	struct msm_camera_power_ctrl_t      *power_info = NULL;
-	int c, end;
+	int c, end, ret;
 	struct msm_sensor_power_setting     power_down_setting_t;
 	unsigned long mount_pos = 0;
 
@@ -358,6 +379,23 @@ int32_t msm_sensor_driver_probe(void *setting)
 	CDBG("sensor_id 0x%x", slave_info->sensor_id_info.sensor_id);
 	CDBG("size %d", slave_info->power_setting_array.size);
 	CDBG("size down %d", slave_info->power_setting_array.size_down);
+
+	if(!file_is_create){
+	/* vcm_type create (/<sysfs>/class/vcm_type) */
+	vcm_type_class = class_create(THIS_MODULE, "vcm_type");
+	if (IS_ERR(vcm_type_class)) {
+		ret = PTR_ERR(vcm_type_class);
+		printk("vcm_type_class: couldn't create vcm_type\n");
+	}
+	ret = class_create_file(vcm_type_class, &vcm_type_value);
+	if (ret) {
+		printk("id_class: couldn't create value\n");
+	}else{
+	printk("id_class: create value ok!!!\n");
+	}
+	file_is_create = 1;
+	}
+
 
 	if (slave_info->is_init_params_valid) {
 		CDBG("position %d",
@@ -557,6 +595,7 @@ int32_t msm_sensor_driver_probe(void *setting)
 		pr_err("%s failed %d\n", __func__, __LINE__);
 		goto FREE_CAMERA_INFO;
 	}
+#if !defined(CONFIG_TCT_8X16_ALTO45)
 	/*
 	 * Update actuator subdevice Id by input actuator name
 	 */
@@ -565,7 +604,7 @@ int32_t msm_sensor_driver_probe(void *setting)
 		pr_err("%s failed %d\n", __func__, __LINE__);
 		goto FREE_CAMERA_INFO;
 	}
-
+#endif
 	/* Power up and probe sensor */
 	rc = s_ctrl->func_tbl->sensor_power_up(s_ctrl);
 	if (rc < 0) {
@@ -574,7 +613,16 @@ int32_t msm_sensor_driver_probe(void *setting)
 	}
 
 	pr_err("%s probe succeeded", slave_info->sensor_name);
-
+#if defined(CONFIG_TCT_8X16_ALTO45)
+	/*
+	 * Update actuator subdevice Id by input actuator name
+	 */
+	rc = msm_sensor_fill_actuator_subdevid_by_name(s_ctrl);
+	if (rc < 0) {
+		pr_err("%s failed %d\n", __func__, __LINE__);
+		goto FREE_CAMERA_INFO;
+	}
+#endif
 	/*
 	  Set probe succeeded flag to 1 so that no other camera shall
 	 * probed on this slot

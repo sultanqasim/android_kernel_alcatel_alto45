@@ -30,7 +30,13 @@
 #include <media/videobuf2-msm-mem.h>
 #include <media/msmb_camera.h>
 
+/* [PLATFORM]-Mod-BEGIN by TCTNB.HJ, 2014/05/23 */
+#ifdef CONFIG_TCT_8X16_COMMON
+#define MSM_POST_EVT_TIMEOUT 10000
+#else
 #define MSM_POST_EVT_TIMEOUT 5000
+#endif
+/* [PLATFORM]-Mod-END by TCTNB.HJ, 2014/05/23 */
 #define MSM_POST_EVT_NOTIMEOUT 0xFFFFFFFF
 #define MSM_CAMERA_STREAM_CNT_BITS  32
 

@@ -8,7 +8,14 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- */
+ *         Modify History For This Module
+ * When           Who             What,Where,Why
+ * --------------------------------------------------------------------------------------
+ * 14/04/26      Hu Jin       Add driver for alto45 cam. MAIN&SUB cam prev&snap.
+ * 14/05/30      Yu Qijiang   add second source sub camera for alto45
+ * --------------------------------------------------------------------------------------
+*/
+
 #include <mach/gpiomux.h>
 #include "msm_sensor.h"
 #include "msm_sd.h"
@@ -27,6 +34,17 @@
 #else
 #define CDBG(fmt, args...) do { } while (0)
 #endif
+int actuator_exist = 1;
+
+/* [PLATFORM]-Add-BEGIN by TCTNB.qijiang.yu, 2014/05/06, OTP dev */
+#ifdef CONFIG_TCT_8X16_COMMON
+#define TCT_SENSOR_OTP_OPEN 1
+#if TCT_SENSOR_OTP_OPEN
+#include "s5k5e2_alto45_v4l2_tct_OTP.h"
+#include "ov5670_alto45_v4l2_tct_OTP.h"
+#endif
+#endif
+/* [PLATFORM]-Add-END by TCTNB.qijiang.yu*/
 
 static void msm_sensor_adjust_mclk(struct msm_camera_power_ctrl_t *ctrl)
 {
@@ -492,12 +510,13 @@ int msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 
 int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 {
-	int rc = 0;
-	uint16_t chipid = 0;
+	int rc = 0, actutor_rc = 0;
+	uint16_t chipid = 0,actuatorid = 0;
 	struct msm_camera_i2c_client *sensor_i2c_client;
 	struct msm_camera_slave_info *slave_info;
 	const char *sensor_name;
-
+	struct msm_camera_cci_client *cci_client;
+	uint16_t sid_bk;
 	if (!s_ctrl) {
 		pr_err("%s:%d failed: %p\n",
 			__func__, __LINE__, s_ctrl);
@@ -527,6 +546,45 @@ int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 	if (chipid != slave_info->sensor_id) {
 		pr_err("msm_sensor_match_id chip id doesnot match\n");
 		return -ENODEV;
+	}
+	/*check if there is actuator of s5k5e2_alto45.
+	Modify-BEGIN by TCTNB.YQJ,07/14/2014,FR-695481 */
+	if (!strcmp(s_ctrl->sensordata->sensor_name, "s5k5e2_alto45"))
+	{
+		cci_client = s_ctrl->sensor_i2c_client->cci_client;
+		sid_bk = cci_client->sid;
+		cci_client->sid = (0x18)>>1;
+		actutor_rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+		sensor_i2c_client, 0xA1,
+		&actuatorid, MSM_CAMERA_I2C_BYTE_DATA);
+		cci_client->sid = sid_bk;
+		if(actutor_rc == 0){
+			actuator_exist = 1;
+			printk("s5k5e2_alto45 have actutor,it is AF module \n");
+		}else
+		{
+			actuator_exist = 0;
+			printk("s5k5e2_alto45 have no actutor,it is FF module \n");
+		}
+		S5K5E2_ALTO45_CMCC_TCT_OTP_get_data(sensor_i2c_client);
+	}
+	if (!strcmp(s_ctrl->sensordata->sensor_name, "ov5670_alto45"))
+	{
+		cci_client = s_ctrl->sensor_i2c_client->cci_client;
+		sid_bk = cci_client->sid;
+		cci_client->sid = (0x18)>>1;
+		actutor_rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+		sensor_i2c_client, 0xD4,
+		&actuatorid, MSM_CAMERA_I2C_BYTE_DATA);
+		cci_client->sid = sid_bk;
+		if(actutor_rc == 0){
+			actuator_exist = 1;
+			printk("ov5670_alto45 have actutor,it is AF module \n");
+		}else
+		{
+			actuator_exist = 0;
+			printk("ov5670_alto45 have no actutor,it is FF module \n");
+		}
 	}
 	return rc;
 }
@@ -558,7 +616,30 @@ static int msm_sensor_get_af_status(struct msm_sensor_ctrl_t *s_ctrl,
 	set the status in the *status variable accordingly*/
 	return 0;
 }
+/* [PLATFORM]-Add-BEGIN by TCTNB.qijiang.yu, 2014/05/06, OTP dev */
+#ifdef CONFIG_TCT_8X16_COMMON
+#if	TCT_SENSOR_OTP_OPEN
+static int TCT_update_OTP(struct msm_sensor_ctrl_t *s_ctrl)
+{
+    mutex_lock(s_ctrl->msm_sensor_mutex);
+	printk("OTP: sensor name: %s\n",s_ctrl->sensordata->sensor_name);
+    if(!strcmp(s_ctrl->sensordata->sensor_name, "s5k5e2_alto45")){
+		printk("OTP: s5k5e2_rio5_cmcc\n");
+		S5K5E2_ALTO45_CMCC_TCT_OTP_calibration(s_ctrl->sensor_i2c_client);
+	}else if(!strcmp(s_ctrl->sensordata->sensor_name, "ov5670_alto45")){
+		printk("OTP: ov5670_alto45\n");
+		update_otp_wb(s_ctrl->sensor_i2c_client);
+	}
+	else{
+		printk("OTP: it should be make some mistakes: %d\n", __LINE__);
+    }
+    mutex_unlock(s_ctrl->msm_sensor_mutex);
 
+	return 0;
+}
+#endif
+#endif
+/* [PLATFORM]-Add-END by TCTNB.qijiang.yu*/
 static long msm_sensor_subdev_ioctl(struct v4l2_subdev *sd,
 			unsigned int cmd, void *arg)
 {
@@ -578,6 +659,14 @@ static long msm_sensor_subdev_ioctl(struct v4l2_subdev *sd,
 		return 0;
 	case MSM_SD_SHUTDOWN:
 		return 0;
+#ifdef CONFIG_TCT_8X16_COMMON
+	case VIDIOC_MSM_SENSOR_GET_OTP_STATUS:
+#if	TCT_SENSOR_OTP_OPEN
+		printk("1msm_sensor_subdev_ioctl  cmd =%d \n",cmd);
+		TCT_update_OTP(s_ctrl);
+		return 0;
+#endif
+#endif
 	default:
 		return -ENOIOCTLCMD;
 	}
@@ -1073,6 +1162,126 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 	return rc;
 }
 
+/* [PLATFORM]-Mod-BEGIN by TCTNB.HJ, 2014/04/26*/
+#ifdef CONFIG_TCT_8X16_COMMON
+static int32_t gc0339_alto45_match_id(struct msm_sensor_ctrl_t *s_ctrl)
+{
+    int32_t rc = 0;
+    uint16_t chipid = 0;
+	int gpio_0 = 0;
+    rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0xfc, 0x10, MSM_CAMERA_I2C_BYTE_DATA);
+    rc |= s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_read(
+            s_ctrl->sensor_i2c_client,
+            s_ctrl->sensordata->slave_info->sensor_id_reg_addr,
+            &chipid, MSM_CAMERA_I2C_BYTE_DATA);
+    if ((rc<0)||(chipid != 0xc8)) {
+        pr_err("%s: %s: read id failed\n", __func__,
+            s_ctrl->sensordata->sensor_name);
+        return rc;
+    }
+	gpio_direction_input(902);
+	gpio_0=gpio_get_value_cansleep(902);
+	printk("gpio_0(CAM_ID) input value =%d",gpio_0);
+	if((!strcmp(s_ctrl->sensordata->sensor_name, "gc0339_alto45") && gpio_0 == 1 )|| (!strcmp(s_ctrl->sensordata->sensor_name, "gc0339_sun_alto45") && gpio_0 == 0 ))
+	{
+	   printk("sensor:%s match id failed~~~\n",s_ctrl->sensordata->sensor_name);
+	   return -ENODEV;
+	}
+	else
+	   printk("sensor:%s match id succeed~~~\n",s_ctrl->sensordata->sensor_name);
+	CDBG("%s: read id: 0x%x expected id 0x%x:\n", __func__, chipid,
+		s_ctrl->sensordata->slave_info->sensor_id);
+/* [PLATFORM]-Mod-BEGIN by TCTNB.YQJ, 2014/05/23*/
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x69, 0x03, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x65, 0x10, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x6c, 0xaa, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x6d, 0x00, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x67, 0x10, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x4a, 0x40, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x4b, 0x40, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x4c, 0x40, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0xe8, 0x04, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0xe9, 0xbb, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x42, 0x20, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x47, 0x10, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x50, 0x40, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0xd0, 0x00, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0xd3, 0x50, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0xf6, 0x07, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x01, 0xfa, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x02, 0x58, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x0f, 0x01, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x60, 0x94, MSM_CAMERA_I2C_BYTE_DATA);
+    s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write(
+            s_ctrl->sensor_i2c_client,
+            0x60, 0x84, MSM_CAMERA_I2C_BYTE_DATA);
+/* [PLATFORM]-Mod-END by TCTNB.YQJ*/
+    if (chipid != s_ctrl->sensordata->slave_info->sensor_id) {
+        pr_err("msm_sensor_match_id chip id doesnot match\n");
+        return -ENODEV;
+    }
+    return rc;
+}
+
+int msm_sensor_check_id(struct msm_sensor_ctrl_t *s_ctrl)
+{
+	int rc;
+
+	if (!strcmp(s_ctrl->sensordata->sensor_name, "gc0339_alto45")||!strcmp(s_ctrl->sensordata->sensor_name, "gc0339_sun_alto45")){
+		rc = gc0339_alto45_match_id(s_ctrl);
+    }else{
+		if (s_ctrl->func_tbl->sensor_match_id)
+			rc = s_ctrl->func_tbl->sensor_match_id(s_ctrl);
+		else
+			rc = msm_sensor_match_id(s_ctrl);
+		if (rc < 0)
+			pr_err("%s:%d match id failed rc %d\n", __func__, __LINE__, rc);
+    }
+	return rc;
+}
+#else
 int msm_sensor_check_id(struct msm_sensor_ctrl_t *s_ctrl)
 {
 	int rc;
@@ -1085,6 +1294,8 @@ int msm_sensor_check_id(struct msm_sensor_ctrl_t *s_ctrl)
 		pr_err("%s:%d match id failed rc %d\n", __func__, __LINE__, rc);
 	return rc;
 }
+#endif
+/* [PLATFORM]-Mod-END by TCTNB.HJ, 2014/04/26*/
 
 static int msm_sensor_power(struct v4l2_subdev *sd, int on)
 {
