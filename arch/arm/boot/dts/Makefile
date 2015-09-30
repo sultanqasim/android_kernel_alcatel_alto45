@@ -218,8 +218,16 @@ endif
 targets += dtbs
 targets += $(DTB_LIST)
 
+#[PLATFORM]-Mod-BGEIN by TCTNB.YJ,2014/03/17, add 8X16 & Alto45 config.
 #used for cleaning - not building
+#ifndef CONFIG_TCT_8X16_COMMON
 subdir- := qcom
+#endif
+ifdef CONFIG_TCT_8X16_ALTO45
+subdir- := alto45
+endif
+#[PLATFORM]-Add-END by TCTNB.YJ
+
 endif
 
 # *.dtb used to be generated in the directory above. Clean out the

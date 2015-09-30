@@ -404,6 +404,8 @@
 		reg = <0xfc342000 0x1000>,
 		      <0xfc340000 0x1000>;
 		reg-names = "etm-base","debug-base";
+
+		qcom,coresight-jtagmm-cpu = <&CPU0>;
 	};
 
 	qcom,msm-rtb {
@@ -726,7 +728,7 @@
 		cpu-vdd-supply = <&pmd9635_l3_corner_ao>;
 	};
 
-	cpubw: qcom,cpubw {
+	qcom,cpubw {
 		compatible = "qcom,cpubw";
 		qcom,cpu-mem-ports = <1 512>;
 		qcom,bw-tbl =
@@ -735,25 +737,15 @@
 			< 3051 /* 400 MHz */ >;
 	};
 
-	devfreq-cpufreq {
-		cpubw-cpufreq {
-			target-dev = <&cpubw>;
-			cpu-to-dev-map =
-				<  600000 1266 >,
-				<  787200 2540 >,
-				< 1152000 3051 >;
-		};
-	};
-
 	qcom,msm-cpufreq@0 {
 		reg = <0 4>;
 		compatible = "qcom,msm-cpufreq";
 		qcom,cpufreq-table =
-			<  300000 >,
-			<  600000 >,
-			<  787200 >,
-			<  998400 >,
-			< 1152000 >;
+			<  300000 1266 >,
+			<  600000 1266 >,
+			<  787200 2540 >,
+			<  998400 3051 >,
+			< 1152000 3051 >;
 	};
 
 	qcom,msm-thermal {

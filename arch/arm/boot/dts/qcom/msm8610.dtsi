@@ -512,7 +512,7 @@
 		cpu-vdd-supply = <&apc_vreg_corner>;
 	};
 
-	cpubw: qcom,cpubw {
+	qcom,cpubw {
 		compatible = "qcom,cpubw";
 		qcom,cpu-mem-ports = <1 512>;
 		qcom,bw-tbl =
@@ -521,26 +521,16 @@
 			< 2540 /* 333 MHz */ >;
 	};
 
-	devfreq-cpufreq {
-		cpubw-cpufreq {
-			target-dev = <&cpubw>;
-			cpu-to-dev-map =
-				<  384000  762 >,
-				<  787200 1525 >,
-				< 1190400 2540 >;
-		};
-	};
-
 	qcom,msm-cpufreq@0 {
 		reg = <0 4>;
 		compatible = "qcom,msm-cpufreq";
 		qcom,cpufreq-table =
-			<  300000 >,
-			<  384000 >,
-			<  600000 >,
-			<  787200 >,
-			<  998400 >,
-			< 1190400 >;
+			<  300000  762 >,
+			<  384000  762 >,
+			<  600000 1525 >,
+			<  787200 1525 >,
+			<  998400 2540 >,
+			< 1190400 2540 >;
 	};
 
 	spmi_bus: qcom,spmi@fc4c0000 {
@@ -1041,6 +1031,8 @@
 		reg = <0xfc34c000 0x1000>,
 		      <0xfc340000 0x1000>;
 		reg-names = "etm-base","debug-base";
+
+		qcom,coresight-jtagmm-cpu = <&CPU0>;
 	};
 
 	jtag_mm1: jtagmm@fc34d000 {
@@ -1048,6 +1040,8 @@
 		reg = <0xfc34d000 0x1000>,
 		      <0xfc342000 0x1000>;
 		reg-names = "etm-base","debug-base";
+
+		qcom,coresight-jtagmm-cpu = <&CPU1>;
 	};
 
 	jtag_mm2: jtagmm@fc34e000 {
@@ -1055,6 +1049,8 @@
 		reg = <0xfc34e000 0x1000>,
 		      <0xfc344000 0x1000>;
 		reg-names = "etm-base","debug-base";
+
+		qcom,coresight-jtagmm-cpu = <&CPU2>;
 	};
 
 	jtag_mm3: jtagmm@fc34f000 {
@@ -1062,6 +1058,8 @@
 		reg = <0xfc34f000 0x1000>,
 		      <0xfc346000 0x1000>;
 		reg-names = "etm-base","debug-base";
+
+		qcom,coresight-jtagmm-cpu = <&CPU3>;
 	};
 
 	qcom,tz-log@fe805720 {

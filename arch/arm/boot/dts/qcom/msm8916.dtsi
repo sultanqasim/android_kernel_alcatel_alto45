@@ -56,12 +56,6 @@
 			reg = <0x0>;
 			enable-method = "qcom,arm-cortex-acc";
 			qcom,acc = <&acc0>;
-			next-level-cache = <&L2_0>;
-			L2_0: l2-cache {
-			      compatible = "arm,arch-cache";
-			      cache-level = <2>;
-			      power-domain = <&l2ccc_0>;
-			};
 		};
 
 		CPU1: cpu@1 {
@@ -70,7 +64,6 @@
 			reg = <0x1>;
 			enable-method = "qcom,arm-cortex-acc";
 			qcom,acc = <&acc1>;
-			next-level-cache = <&L2_0>;
 		};
 
 		CPU2: cpu@2 {
@@ -79,7 +72,6 @@
 			reg = <0x2>;
 			enable-method = "qcom,arm-cortex-acc";
 			qcom,acc = <&acc2>;
-			next-level-cache = <&L2_0>;
 		};
 
 		CPU3: cpu@3 {
@@ -88,7 +80,6 @@
 			reg = <0x3>;
 			enable-method = "qcom,arm-cortex-acc";
 			qcom,acc = <&acc3>;
-			next-level-cache = <&L2_0>;
 		};
 	};
 
@@ -112,11 +103,6 @@
 	#size-cells = <1>;
 	ranges = <0 0 0 0xffffffff>;
 	compatible = "simple-bus";
-
-	l2ccc_0: clock-controller@b011000 {
-		compatible = "qcom,8916-l2ccc";
-		reg = <0x0b011000 0x1000>;
-	};
 
 	acc0:clock-controller@b088000 {
 		compatible = "qcom,arm-cortex-acc";
@@ -282,8 +268,9 @@
 
 	qcom,clock-a7@0b011050 {
 		compatible = "qcom,clock-a53-8916";
-		reg = <0x0b011050 0x8>;
-		reg-names = "rcg-base";
+		reg = <0x0b011050 0x8>,
+		      <0x0005c004 0x8>;
+		reg-names = "rcg-base", "efuse1";
 		qcom,safe-freq = < 400000000 >;
 		cpu-vdd-supply = <&apc_vreg_corner>;
 		clocks = <&clock_gcc clk_gpll0_ao_clk_src>,
@@ -297,10 +284,21 @@
 			<  800000000 4>,
 			<  998400000 5>,
 			< 1094400000 6>,
-			< 1190400000 7>;
+			< 1152000000 7>,
+			< 1209600000 8>;
+
+		qcom,speed1-bin-v0 =
+			<          0 0>,
+			<  200000000 1>,
+			<  400000000 2>,
+			<  533333000 3>,
+			<  800000000 4>,
+			<  998400000 5>,
+			< 1094400000 6>,
+			< 1152000000 7>;
 	};
 
-	cpubw: qcom,cpubw {
+	qcom,cpubw {
 		compatible = "qcom,cpubw";
 		qcom,cpu-mem-ports = <1 512>;
 		qcom,bw-tbl =
@@ -310,30 +308,25 @@
 			< 1525 /* 200 MHz */>,
 			< 3051 /* 400 MHz */>,
 			< 4066 /* 533 MHz */>;
-	};
-
-	devfreq-cpufreq {
-		cpubw-cpufreq {
-			target-dev = <&cpubw>;
-			cpu-to-dev-map =
-				 <  400000  762>,
-				 <  998400  1525>,
-				 < 1094400  3051>,
-				 < 1190400  4066>;
-		};
+		qcom,ab-tbl =
+			<  229 >,
+			<  458 >,
+			<  915 >,
+			< 1220 >;
 	};
 
 	qcom,msm-cpufreq@0 {
 		reg = <0 4>;
 		compatible = "qcom,msm-cpufreq";
 		qcom,cpufreq-table =
-			 <  200000 >,
-			 <  400000 >,
-			 <  533330 >,
-			 <  800000 >,
-			 <  998400 >,
-			 < 1094400 >,
-			 < 1190400 >;
+			 <  200000  762>,
+			 <  400000  762>,
+			 <  533330  1525>,
+			 <  800000  1525>,
+			 <  998400  3051>,
+			 < 1094400  3051>,
+			 < 1152000  4066>,
+			 < 1209600  4066>;
 	};
 
 	qcom,sps {
@@ -458,6 +451,7 @@
 		compatible = "qcom,android-usb";
 		reg = <0x086000c8 0xc8>;
 		qcom,android-usb-swfi-latency = <1>;
+		qcom,streaming-func = "mtp";
 		qcom,android-usb-uicc-nluns = /bits/ 8 <1>;
 	};
 
@@ -479,6 +473,12 @@
 		reg-names = "rfsa_mdm";
 	};
 
+	jtag_fuse: jtagfuse@5e01c {
+		compatible = "qcom,jtag-fuse";
+		reg = <0x5e01c 0x8>;
+		reg-names = "fuse-base";
+	};
+
 	jtag_mm0: jtagmm@85c000 {
 		compatible = "qcom,jtagv8-mm";
 		reg = <0x85c000 0x1000>,
@@ -488,6 +488,8 @@
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
+
+		qcom,coresight-jtagmm-cpu = <&CPU0>;
 	};
 
 	jtag_mm1: jtagmm@85d000 {
@@ -499,6 +501,8 @@
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
+
+		qcom,coresight-jtagmm-cpu = <&CPU1>;
 	};
 
 	jtag_mm2: jtagmm@85e000 {
@@ -510,6 +514,8 @@
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
+
+		qcom,coresight-jtagmm-cpu = <&CPU2>;
 	};
 
 	jtag_mm3: jtagmm@85f000 {
@@ -521,6 +527,8 @@
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
+
+		qcom,coresight-jtagmm-cpu = <&CPU3>;
 	};
 
 	sdhc_1: sdhci@07824000 {
@@ -1575,8 +1583,8 @@
 			<244800 160000000>,
 			<108000 100000000>;
 		qcom,hfi = "venus";
-		qcom,reg-presets = <0xE0020 0x0aaaaaaa>,
-			<0xE0024 0x0aaaaaaa>,
+		qcom,reg-presets = <0xE0020 0x05555556>,
+			<0xE0024 0x05555556>,
 			<0x80124 0x00000003>;
 		qcom,buffer-type-tz-usage-table = <0x241 0x1>,
 			<0x106 0x2>,
@@ -1660,6 +1668,14 @@
 		compatible = "arm,armv8-pmuv3";
 		qcom,irq-is-percpu;
 		interrupts = <1 7 0xf00>;
+	};
+
+	qcom,avtimer {
+		compatible = "qcom,avtimer";
+		reg = <0x0770600C 0x4>,
+			<0x07706010 0x4>;
+		reg-names = "avtimer_lsb_addr", "avtimer_msb_addr";
+		qcom,clk_div = <27>;
 	};
 };
 
@@ -1787,6 +1803,28 @@
 		qcom,pre-div-channel-scaling = <0>;
 		qcom,calibration-type = "ratiometric";
 		qcom,scale-function = <2>;
+		qcom,hw-settle-time = <2>;
+		qcom,fast-avg-setup = <0>;
+	};
+
+	chan@32 {
+		label = "xo_therm";
+		reg = <0x32>;
+		qcom,decimation = <0>;
+		qcom,pre-div-channel-scaling = <0>;
+		qcom,calibration-type = "ratiometric";
+		qcom,scale-function = <4>;
+		qcom,hw-settle-time = <2>;
+		qcom,fast-avg-setup = <0>;
+	};
+
+	chan@3c {
+		label = "xo_therm_buf";
+		reg = <0x3c>;
+		qcom,decimation = <0>;
+		qcom,pre-div-channel-scaling = <0>;
+		qcom,calibration-type = "ratiometric";
+		qcom,scale-function = <4>;
 		qcom,hw-settle-time = <2>;
 		qcom,fast-avg-setup = <0>;
 	};

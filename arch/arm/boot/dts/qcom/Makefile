@@ -28,6 +28,8 @@ dtb-$(CONFIG_ARCH_MSM8974) += msm8974-v1-cdp.dtb \
 	msm8974pro-ac-pm8941-liquid.dtb \
 	msm8974pro-ac-pm8941-mtp.dtb \
 	msm8974pro-ac-pma8084-pm8941-mtp.dtb
+#[PLATFORM]-Mod-BGEIN by TCTNB.YJ,2014/03/17, add 8X16 & Alto45 config.
+ifndef CONFIG_TCT_8X16_COMMON
 dtb-$(CONFIG_ARCH_MSM8916) += msm8916-sim.dtb \
 	msm8916-rumi.dtb \
 	msm8916-cdp.dtb \
@@ -40,6 +42,7 @@ dtb-$(CONFIG_ARCH_MSM8916) += msm8916-sim.dtb \
 	msm8916-qrd-skuh.dtb \
 	msm8916-qrd-skuhf.dtb \
 	msm8916-qrd-skui.dtb \
+	msm8916-qrd-skuic.dtb \
 	msm8916-512mb-qrd-skuh.dtb \
 	apq8016-mtp.dtb \
 	apq8016-mtp-smb1360.dtb \
@@ -49,8 +52,24 @@ dtb-$(CONFIG_ARCH_MSM8916) += msm8916-sim.dtb \
 	msm8939-cdp.dtb \
 	msm8939-cdp-smb1360.dtb \
 	msm8939-mtp.dtb \
-	msm8939-mtp-smb1360.dtb \
-	msm8939-mtp-wcd9306.dtb
+	msm8939-mtp-smb1360.dtb
+else
+dtb-$(CONFIG_ARCH_MSM8916) += msm8916-sim.dtb \
+	msm8916-rumi.dtb \
+	msm8916-cdp.dtb \
+	msm8916-cdp-smb1360.dtb \
+	msm8916-mtp-smb1360.dtb \
+	msm8916-qrd-skuh.dtb \
+	msm8939-sim.dtb \
+	msm8939-rumi.dtb \
+	msm8939-qrd-skuk.dtb \
+	msm8939-cdp.dtb \
+	msm8939-cdp-smb1360.dtb \
+	msm8939-mtp.dtb \
+	msm8939-mtp-smb1360.dtb
+endif
+#[PLATFORM]-Add-END by TCTNB.YJ
+
 dtb-$(CONFIG_ARCH_MSM8226) += msm8226-sim.dtb \
 	msm8226-fluid.dtb \
 	msm8226-v1-cdp.dtb \
