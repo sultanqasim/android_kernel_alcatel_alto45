@@ -110,6 +110,7 @@ config ARCH_MPQ8092
 config ARCH_MSM8916
 	bool "MSM8916"
 	select ARCH_MSM_CORTEXMP
+	select GPIO_MSM_V3
 	select ARM_GIC
 	select MULTI_IRQ_HANDLER
 	select CPU_V7
@@ -683,6 +684,20 @@ config MSM_CPU_FREQ_MIN
 
 endif # CPU_FREQ_MSM
 
+config MSM_DEVFREQ_CPUBW
+	bool "Devfreq device for CPU<->DDR IB/AB BW voting"
+	depends on PM_DEVFREQ
+	select DEVFREQ_GOV_PERFORMANCE
+	select DEVFREQ_GOV_POWERSAVE
+	select DEVFREQ_GOV_USERSPACE
+	select DEVFREQ_GOV_MSM_CPUFREQ
+	default n
+	help
+	  Different devfreq governors use this devfreq device to make CPU to
+	  DDR IB/AB bandwidth votes. This driver provides a SoC topology
+	  agnostic interface to so that some of the devfreq governors can be
+	  shared across SoCs.
+
 config RTAC
 	bool "MSM8K real-time audio calibration support"
 	default y
@@ -1035,6 +1050,26 @@ config MSM_UARTDM_Core_v14
 	depends on SERIAL_MSM_HS
 	help
 		Select if BLSP based UART Core v.14 or higher is present.
+
+#[PLATFORM]-Add-BEGIN by TCTNB.YJ, 2014/03/17, add 8x16 and Alto45 Kconfig.
+config TCT_8X16_COMMON
+        depends on ARCH_MSM8916
+        bool "MSM8916 TCT COMMON"
+        help
+          Support for the TCT COMMON device.
+
+config TCT_8X16_ALTO45
+        depends on ARCH_MSM8916
+        bool "MSM8916 ALTO45"
+        help
+          Support for the TCT ALTO45 device.
+#[PLATFORM]-Add-END by TCTNB.YJ
+
+config TCT_8X16_POP8LTE
+        depends on ARCH_MSM8916
+        bool "MSM8916 POP8LTE"
+        help
+          Support for the TCT POP8LTE device.
 
 config MSM_BOOT_STATS
 	bool "Use MSM boot stats reporting"
